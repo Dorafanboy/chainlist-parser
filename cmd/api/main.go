@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 
@@ -19,7 +18,7 @@ import (
 func main() {
 	// --- Configuration ---
 	cfgPath := "configs"
-	cfg, err := config.LoadConfig(cfgPath)
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		log.Fatalf("Failed to load configuration from %s: %v", cfgPath, err)
 	}
@@ -37,11 +36,11 @@ func main() {
 
 	// Repositories & Checker
 	chainlistRepo := repository.NewChainlistRepo(cfg.Chainlist, logger)
-	cacheRepo := repository.NewGoCacheRepo(cfg.Cache, logger)
+	cacheRepo := repository.NewGoCacheRepo(*cfg, logger)
 	rpcChecker := repository.NewRPCChecker(logger)
 
 	// Use Cases
-	chainUseCase := usecase.NewChainUseCase(chainlistRepo, cacheRepo, rpcChecker, logger, cfg)
+	chainUseCase := usecase.NewChainUseCase(chainlistRepo, cacheRepo, rpcChecker, logger, *cfg)
 
 	// Handlers
 	chainHandler := http.NewChainHandler(chainUseCase, logger)
@@ -70,7 +69,8 @@ func main() {
 		}
 	}
 
-	serverAddr := fmt.Sprintf(":%d", cfg.Server.Port)
+	// Correctly format the server address string
+	serverAddr := ":" + cfg.Server.Port
 	logger.Info("Starting HTTP server", zap.String("address", serverAddr))
 
 	// Start server with logging middleware

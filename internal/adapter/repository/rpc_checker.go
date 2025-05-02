@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -50,6 +51,18 @@ type JSONRPCError struct {
 }
 
 func (c *rpcChecker) CheckRPC(ctx context.Context, rpcURL string) (isWorking bool, latency time.Duration, err error) {
+	// Skip WSS endpoints as fasthttp client doesn't support websockets for simple checks
+	if strings.HasPrefix(rpcURL, "wss://") {
+		c.logger.Debug("Skipping WSS check", zap.String("url", rpcURL))
+		return false, 0, nil // Indicate not checked (not working for our purposes) without error
+	}
+
+	// Only proceed with http/https
+	if !strings.HasPrefix(rpcURL, "http://") && !strings.HasPrefix(rpcURL, "https://") {
+		c.logger.Warn("Skipping check for unsupported protocol", zap.String("url", rpcURL))
+		return false, 0, fmt.Errorf("unsupported protocol in URL: %s", rpcURL)
+	}
+
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)

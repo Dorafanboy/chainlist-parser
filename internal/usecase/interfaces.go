@@ -16,8 +16,8 @@ type ChainRepository interface {
 type CacheRepository interface {
 	GetChains(ctx context.Context) ([]entity.Chain, error)
 	SetChains(ctx context.Context, chains []entity.Chain, ttl time.Duration) error
-	GetChainRPCs(ctx context.Context, chainID int64) ([]string, error)
-	SetChainRPCs(ctx context.Context, chainID int64, rpcs []string, ttl time.Duration) error
+	GetChainCheckedRPCs(ctx context.Context, chainID int64) ([]entity.RPCDetail, error)
+	SetChainCheckedRPCs(ctx context.Context, chainID int64, rpcs []entity.RPCDetail, ttl time.Duration) error
 }
 
 // RPCChecker defines the interface for checking RPC endpoint status.
@@ -27,6 +27,6 @@ type RPCChecker interface {
 
 // ChainUseCase defines the interface for chain related use cases.
 type ChainUseCase interface {
-	GetAllChainsWithWorkingRPCs(ctx context.Context) ([]entity.Chain, error)
-	GetWorkingRPCsForChain(ctx context.Context, chainID int64) ([]string, error)
+	GetAllChainsChecked(ctx context.Context) ([]entity.Chain, error)
+	GetCheckedRPCsForChain(ctx context.Context, chainID int64) ([]entity.RPCDetail, error)
 }

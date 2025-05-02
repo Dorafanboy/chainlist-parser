@@ -1,5 +1,13 @@
 package entity
 
+// RPCDetail holds information about a specific RPC endpoint after checking.
+type RPCDetail struct {
+	URL       string `json:"url"`
+	Protocol  string `json:"protocol"`            // "http", "https", "wss"
+	IsWorking *bool  `json:"isWorking"`           // Pointer to bool allows null for unchecked (e.g., wss)
+	LatencyMs *int64 `json:"latencyMs,omitempty"` // Pointer to int64 allows null
+}
+
 // Based on structure from https://chainid.network/chains.json
 // We might only need a subset of these fields.
 
@@ -24,8 +32,7 @@ type Chain struct {
 	RedFlags  []string   `json:"redFlags,omitempty"` // List of potential issues
 
 	// --- Fields added by our service ---
-	WorkingRPCs    []string `json:"workingRPCs,omitempty"`    // Populated after checking
-	NonWorkingRPCs []string `json:"nonWorkingRPCs,omitempty"` // Optional: Populated after checking
+	CheckedRPCs []RPCDetail `json:"checkedRPCs,omitempty"` // Populated after checking
 }
 
 type Currency struct {
@@ -57,12 +64,4 @@ type Parent struct {
 
 type Bridge struct {
 	URL string `json:"url"`
-}
-
-// RPCInfo represents a checked RPC endpoint result
-type RPCInfo struct {
-	URL       string `json:"url"`
-	IsWorking bool   `json:"isWorking"`
-	LatencyMs int64  `json:"latencyMs,omitempty"` // Optional latency
-	CheckedAt int64  `json:"checkedAt,omitempty"` // Optional timestamp
 }
