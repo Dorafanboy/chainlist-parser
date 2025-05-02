@@ -1,0 +1,240 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Chainlist Parser API",
+    "description": "API microservice to fetch and provide validated, working RPC endpoints for EVM chains based on Chainlist data.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Chains",
+      "description": "Operations related to fetching chain information and RPCs"
+    }
+  ],
+  "paths": {
+    "/chains": {
+      "get": {
+        "tags": [
+          "Chains"
+        ],
+        "summary": "Get All Chains with Working RPCs",
+        "description": "Retrieves a list of all known chains, each populated with its currently verified working RPC endpoints. Results are typically cached.",
+        "operationId": "getAllChains",
+        "responses": {
+          "200": {
+            "description": "Successful retrieval of chains with working RPCs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChainWithWorkingRPCs"
+                  }
+                },
+                "example": [
+                  {
+                    "name": "Ethereum Mainnet",
+                    "chain": "ETH",
+                    "rpc": [
+                      "https://mainnet.infura.io/v3/YOUR_INFURA_ID",
+                      "wss://mainnet.infura.io/ws/v3/YOUR_INFURA_ID",
+                      "https://api.mycryptoapi.com/eth",
+                      "https://cloudflare-eth.com",
+                      "https://ethereum.publicnode.com",
+                      "wss://ethereum.publicnode.com"
+                    ],
+                    "nativeCurrency": {
+                      "name": "Ether",
+                      "symbol": "ETH",
+                      "decimals": 18
+                    },
+                    "shortName": "eth",
+                    "chainId": 1,
+                    "networkId": 1,
+                    "workingRPCs": [
+                      "https://cloudflare-eth.com",
+                      "https://ethereum.publicnode.com"
+                    ]
+                  },
+                  {
+                    "name": "Arbitrum One",
+                    "chain": "ETH",
+                    "rpc": [
+                      "https://arb1.arbitrum.io/rpc",
+                      "https://arbitrum-one.publicnode.com",
+                      "wss://arbitrum-one.publicnode.com"
+                    ],
+                    "nativeCurrency": {
+                      "name": "Ether",
+                      "symbol": "ETH",
+                      "decimals": 18
+                    },
+                    "shortName": "arb1",
+                    "chainId": 42161,
+                    "networkId": 42161,
+                    "workingRPCs": [
+                      "https://arb1.arbitrum.io/rpc",
+                      "https://arbitrum-one.publicnode.com"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error. Failed to fetch or process chain data."
+          }
+        }
+      }
+    },
+    "/chains/{chainId}/rpcs": {
+      "get": {
+        "tags": [
+          "Chains"
+        ],
+        "summary": "Get Working RPCs for a Specific Chain",
+        "description": "Retrieves a list of currently verified working RPC endpoints for a specific chain identified by its chainId.",
+        "operationId": "getChainRPCs",
+        "parameters": [
+          {
+            "name": "chainId",
+            "in": "path",
+            "description": "The unique identifier (integer) for the chain.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "example": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful retrieval of working RPCs for the specified chain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri",
+                    "example": "https://cloudflare-eth.com"
+                  }
+                },
+                "example": [
+                  "https://cloudflare-eth.com",
+                  "https://ethereum.publicnode.com"
+                ]
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request. The provided chainId is invalid (e.g., not an integer)."
+          },
+          "404": {
+            "description": "Not Found. The chain with the specified chainId was not found, or it currently has no verified working RPC endpoints."
+          },
+          "500": {
+            "description": "Internal Server Error. Failed to process the request."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChainWithWorkingRPCs": {
+        "type": "object",
+        "description": "Represents an EVM chain with its list of verified working RPCs.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Ethereum Mainnet"
+          },
+          "chain": {
+            "type": "string",
+            "example": "ETH"
+          },
+          "rpc": {
+            "type": "array",
+            "description": "Original list of RPC endpoints provided by the source.",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "example": [
+              "https://mainnet.infura.io/v3/YOUR_INFURA_ID",
+              "https://cloudflare-eth.com"
+            ]
+          },
+          "nativeCurrency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "shortName": {
+            "type": "string",
+            "example": "eth"
+          },
+          "chainId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The unique identifier for the chain.",
+            "example": 1
+          },
+          "networkId": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1
+          },
+          "workingRPCs": {
+            "type": "array",
+            "description": "List of RPC endpoints verified as working by the service.",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            },
+            "example": [
+              "https://cloudflare-eth.com"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "chain",
+          "rpc",
+          "nativeCurrency",
+          "shortName",
+          "chainId",
+          "networkId"
+        ]
+      },
+      "Currency": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Ether"
+          },
+          "symbol": {
+            "type": "string",
+            "example": "ETH"
+          },
+          "decimals": {
+            "type": "integer",
+            "example": 18
+          }
+        },
+        "required": [
+          "name",
+          "symbol",
+          "decimals"
+        ]
+      }
+    }
+  }
+} 

@@ -29,10 +29,9 @@ Built with Go using Clean Architecture.
 The `Makefile` provides convenient targets:
 *   `make help`: Show available commands.
 *   `make lint`: Run linter.
-*   `make generate`: Generate mocks.
-*   `make test`: Run tests (includes mock generation).
+*   `make test`: Run tests.
 *   `make build`: Build the binary.
-*   `make run`: Run the service locally (requires mocks generated).
+*   `make run`: Run the service locally.
 *   `make clean`: Remove build artifacts.
 *   `make docker-build`: Build the Docker image.
 *   `make docker-up`: Start the service in Docker (detached mode).
@@ -65,23 +64,16 @@ go build -o build/chainlist-parser cmd/api/main.go
 
 **Running Tests:**
 
-1.  **Install mocking tool:**
+1.  **Install dependencies (if not already done):**
     ```bash
-    go install github.com/golang/mock/mockgen@v1.6.0
+    go mod tidy
     ```
-2.  **Generate mocks:**
+2.  **Run tests:**
     ```bash
-    go generate ./...
-    ```
-3.  **Run tests:**
-    ```bash
+    make test 
+    # or manually:
     go test ./...
     ```
 
 **Running with Docker Compose:**
-```bash
-make docker-up
-# To stop: make docker-down
 ```
-
-(Instructions to be added later)

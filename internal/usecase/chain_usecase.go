@@ -63,24 +63,52 @@ func (uc *chainUseCase) GetWorkingRPCsForChain(ctx context.Context, chainID int6
 	}
 	uc.logger.Debug("Cache miss or error for chain RPCs", zap.Int64("chainId", chainID), zap.Error(err))
 
-	// 2. If cache miss, get all chains data (might trigger fetch/check if needed)
-	allChains, err := uc.GetAllChainsWithWorkingRPCs(ctx)
+	// 2. Fetch all chains from the repository to find the specific one
+	uc.logger.Debug("Fetching all chains to find specific chain info", zap.Int64("chainId", chainID))
+	rawChains, err := uc.chainRepo.GetAllChains(ctx)
 	if err != nil {
-		uc.logger.Error("Failed to get all chains while looking for specific chain RPCs", zap.Int64("chainId", chainID), zap.Error(err))
-		return nil, err
+		uc.logger.Error("Failed to get all chains from repo while looking for specific chain RPCs",
+			zap.Int64("chainId", chainID), zap.Error(err))
+		return nil, err // Return error if fetching failed
 	}
 
-	// 3. Find the specific chain and return its working RPCs
-	for _, chain := range allChains {
-		if chain.ChainID == chainID {
-			uc.logger.Debug("Found chain in fetched data", zap.Int64("chainId", chainID), zap.Strings("workingRPCs", chain.WorkingRPCs))
-			return chain.WorkingRPCs, nil
+	// 3. Find the specific chain
+	var foundChain *entity.Chain
+	for i := range rawChains {
+		if rawChains[i].ChainID == chainID {
+			foundChain = &rawChains[i]
+			break
 		}
 	}
 
-	uc.logger.Warn("Chain not found after fetching all chains", zap.Int64("chainId", chainID))
-	// Consider returning a specific error like ErrNotFound
-	return nil, nil // Or return an error indicating not found
+	// 4. Handle chain not found
+	if foundChain == nil {
+		uc.logger.Warn("Chain not found in repository data", zap.Int64("chainId", chainID))
+		// Return nil, nil to indicate not found, handler will return 404
+		return nil, nil
+	}
+
+	uc.logger.Debug("Found chain, checking its RPCs", zap.Int64("chainId", chainID), zap.Int("rpcCount", len(foundChain.RPC)))
+
+	// 5. Check RPCs only for the found chain
+	checkerTimeout := uc.cfg.Checker.GetTimeout()
+	workingRPCs := uc.checkChainRPCs(checkerTimeout, foundChain.RPC)
+	uc.logger.Debug("Finished checking RPCs for chain", zap.Int64("chainId", chainID), zap.Int("workingCount", len(workingRPCs)))
+
+	// 6. Cache the result for this specific chain
+	cacheTTL := uc.cfg.Cache.GetTTL()
+	err = uc.cacheRepo.SetChainRPCs(ctx, chainID, workingRPCs, cacheTTL)
+	if err != nil {
+		// Log caching error but don't fail the request
+		uc.logger.Error("Failed to cache working RPCs for chain", zap.Int64("chainId", chainID), zap.Error(err))
+	}
+
+	// 7. Return the found working RPCs
+	return workingRPCs, nil
+
+	// uc.logger.Warn("Chain not found after fetching all chains", zap.Int64("chainId", chainID))
+	// // Consider returning a specific error like ErrNotFound
+	// return nil, nil // Or return an error indicating not found
 }
 
 // fetchCheckAndCacheAllChains fetches from source, checks RPCs, and updates cache.

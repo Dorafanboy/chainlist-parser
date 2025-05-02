@@ -7,8 +7,6 @@ import (
 	"chainlist-parser/internal/entity"
 )
 
-//go:generate mockgen -destination=mocks/mock_interfaces.go -package=mocks . ChainRepository,CacheRepository,RPCChecker
-
 // ChainRepository defines the interface for accessing chain data.
 type ChainRepository interface {
 	GetAllChains(ctx context.Context) ([]entity.Chain, error)

@@ -14,7 +14,6 @@ help:
 	@echo "Targets:"
 	@echo "  help          Show this help message"
 	@echo "  lint          Run golangci-lint"
-	@echo "  generate      Generate mocks (go generate)"
 	@echo "  test          Run tests"
 	@echo "  build         Build the binary into $(BUILD_DIR)/"
 	@echo "  run           Run the service locally using go run"
@@ -29,15 +28,9 @@ lint:
 	@echo "Running linter..."
 	@golangci-lint run ./...
 
-# Generate mocks
-.PHONY: generate
-generate:
-	@echo "Generating mocks..."
-	@go generate ./...
-
 # Testing
 .PHONY: test
-test: generate ## Ensure mocks are generated before testing
+test:
 	@echo "Running tests..."
 	@go test -v -race -coverprofile=coverage.out $(PKG_LIST)
 	@echo "Test coverage report generated: coverage.out"
@@ -52,7 +45,7 @@ build: clean
 
 # Run locally
 .PHONY: run
-run: generate
+run:
 	@echo "Running service locally (go run)..."
 	@go run $(CMD_PATH)
 

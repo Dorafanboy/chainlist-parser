@@ -10,7 +10,7 @@ chainlist:
 
 # RPC Checker configuration
 checker:
-  timeout_seconds: 5       # Timeout for checking each RPC endpoint
+  timeout_seconds: 15       # Timeout for checking each RPC endpoint
   check_interval_minutes: 30 # How often to re-check all RPCs in the background
 
 # Cache configuration
@@ -20,5 +20,5 @@ cache:
 
 # Logger configuration
 logger:
-  level: "info" # Log level (debug, info, warn, error, dpanic, panic, fatal)
+  level: "debug" # Log level (debug, info, warn, error, dpanic, panic, fatal)
   encoding: "json" # Log encoding (json or console) 
