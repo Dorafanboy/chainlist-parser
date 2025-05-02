@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chainlist-parser-app
+    ports:
+      # Map host port 8080 to container port 8080 (or the one defined in config)
+      - "8080:8080"
+    # volumes:
+      # Mount local configs for easier development/testing if needed
+      # - type: bind
+      #   source: ./configs
+      #   target: /app/configs
+    # environment:
+      # Example of overriding config via environment variables (Viper)
+      # SERVER_PORT: 8081
+      # LOGGER_LEVEL: debug
+    restart: unless-stopped
+    # healthcheck: # Optional: Add a healthcheck
+    #   test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+    #   interval: 30s
+    #   timeout: 5s
+    #   retries: 3 

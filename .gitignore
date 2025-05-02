@@ -18,11 +18,13 @@
 # vendor/
 
 # Go workspace file
-go.work
-go.work.sum
+# go.work
 
 # Environment variables file
-.env
+.env*
+
+# Build output
+/build/
 
 # idea file
 .idea

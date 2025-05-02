@@ -1,0 +1,24 @@
+# Configuration for Chainlist Parser Service
+
+# HTTP Server configuration
+server:
+  port: 8080 # Port to listen on
+
+# Chainlist data source
+chainlist:
+  url: "https://chainid.network/chains.json" # URL to fetch chain data
+
+# RPC Checker configuration
+checker:
+  timeout_seconds: 5       # Timeout for checking each RPC endpoint
+  check_interval_minutes: 30 # How often to re-check all RPCs in the background
+
+# Cache configuration
+cache:
+  ttl_minutes: 60         # Time-to-live for cached RPC data
+  cleanup_interval_minutes: 10 # How often to clean up expired cache items
+
+# Logger configuration
+logger:
+  level: "info" # Log level (debug, info, warn, error, dpanic, panic, fatal)
+  encoding: "json" # Log encoding (json or console) 
