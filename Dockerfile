@@ -46,4 +46,4 @@ EXPOSE 8080
 ENTRYPOINT ["/bin/chainlist-parser"]
 
 # Optionally, specify default command arguments if needed
-# CMD ["--config", "configs/config.yaml"] # Example if flags were used 
+# CMD ["--config", "config/config.yaml"] # Example if flags were used 

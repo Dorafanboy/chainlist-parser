@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"chainlist-parser/internal/usecase"
+
 	"github.com/valyala/fasthttp"
 	"go.uber.org/zap"
-
-	"chainlist-parser/internal/usecase"
 )
 
 // Compile-time check
@@ -22,10 +22,8 @@ type rpcChecker struct {
 }
 
 func NewRPCChecker(logger *zap.Logger) usecase.RPCChecker {
-	// Consider configuring the client (e.g., timeouts, concurrency)
 	return &rpcChecker{
 		client: &fasthttp.Client{
-			// Example: Set a default read timeout, but context deadline should override
 			ReadTimeout: 10 * time.Second,
 		},
 		logger: logger.Named("RPCChecker"),
@@ -51,13 +49,11 @@ type JSONRPCError struct {
 }
 
 func (c *rpcChecker) CheckRPC(ctx context.Context, rpcURL string) (isWorking bool, latency time.Duration, err error) {
-	// Skip WSS endpoints as fasthttp client doesn't support websockets for simple checks
 	if strings.HasPrefix(rpcURL, "wss://") {
 		c.logger.Debug("Skipping WSS check", zap.String("url", rpcURL))
-		return false, 0, nil // Indicate not checked (not working for our purposes) without error
+		return false, 0, nil
 	}
 
-	// Only proceed with http/https
 	if !strings.HasPrefix(rpcURL, "http://") && !strings.HasPrefix(rpcURL, "https://") {
 		c.logger.Warn("Skipping check for unsupported protocol", zap.String("url", rpcURL))
 		return false, 0, fmt.Errorf("unsupported protocol in URL: %s", rpcURL)
@@ -75,10 +71,8 @@ func (c *rpcChecker) CheckRPC(ctx context.Context, rpcURL string) (isWorking boo
 
 	startTime := time.Now()
 
-	// Use fasthttp.DoTimeout if context deadline is not set or longer than client default
-	// Or manage cancellation more explicitly if needed.
 	deadline, hasDeadline := ctx.Deadline()
-	timeout := c.client.ReadTimeout // Default client timeout
+	timeout := c.client.ReadTimeout
 	if hasDeadline {
 		requestTimeout := time.Until(deadline)
 		if requestTimeout > 0 && (timeout <= 0 || requestTimeout < timeout) {
@@ -132,6 +126,5 @@ func (c *rpcChecker) CheckRPC(ctx context.Context, rpcURL string) (isWorking boo
 		return false, latency, fmt.Errorf("invalid JSON-RPC structure")
 	}
 
-	// If we got here, it seems to be working
 	return true, latency, nil
 }

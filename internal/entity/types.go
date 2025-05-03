@@ -3,36 +3,31 @@ package entity
 // RPCDetail holds information about a specific RPC endpoint after checking.
 type RPCDetail struct {
 	URL       string `json:"url"`
-	Protocol  string `json:"protocol"`            // "http", "https", "wss"
-	IsWorking *bool  `json:"isWorking"`           // Pointer to bool allows null for unchecked (e.g., wss)
-	LatencyMs *int64 `json:"latencyMs,omitempty"` // Pointer to int64 allows null
+	Protocol  string `json:"protocol"`
+	IsWorking *bool  `json:"isWorking"`
+	LatencyMs *int64 `json:"latencyMs,omitempty"`
 }
 
-// Based on structure from https://chainid.network/chains.json
-// We might only need a subset of these fields.
-
 type Chain struct {
-	Name      string     `json:"name"`
-	Chain     string     `json:"chain"`
-	Icon      string     `json:"icon,omitempty"` // Optional icon identifier
-	RPC       []string   `json:"rpc"`            // List of RPC URLs
-	Features  []Feature  `json:"features,omitempty"`
-	Faucets   []string   `json:"faucets,omitempty"`
-	Currency  Currency   `json:"nativeCurrency"`
-	InfoURL   string     `json:"infoURL"`
-	ShortName string     `json:"shortName"`
-	ChainID   int64      `json:"chainId"` // Use int64 for potentially large IDs
-	NetworkID int64      `json:"networkId"`
-	Slip44    int64      `json:"slip44,omitempty"`
-	Ens       *Ens       `json:"ens,omitempty"`
-	Explorers []Explorer `json:"explorers,omitempty"`
-	Title     string     `json:"title,omitempty"`
-	Parent    *Parent    `json:"parent,omitempty"`
-	Network   string     `json:"network,omitempty"`  // e.g., "mainnet", "testnet"
-	RedFlags  []string   `json:"redFlags,omitempty"` // List of potential issues
-
-	// --- Fields added by our service ---
-	CheckedRPCs []RPCDetail `json:"checkedRPCs,omitempty"` // Populated after checking
+	Name        string      `json:"name"`
+	Chain       string      `json:"chain"`
+	Icon        string      `json:"icon,omitempty"`
+	RPC         []string    `json:"rpc"`
+	Features    []Feature   `json:"features,omitempty"`
+	Faucets     []string    `json:"faucets,omitempty"`
+	Currency    Currency    `json:"nativeCurrency"`
+	InfoURL     string      `json:"infoURL"`
+	ShortName   string      `json:"shortName"`
+	ChainID     int64       `json:"chainId"`
+	NetworkID   int64       `json:"networkId"`
+	Slip44      int64       `json:"slip44,omitempty"`
+	Ens         *Ens        `json:"ens,omitempty"`
+	Explorers   []Explorer  `json:"explorers,omitempty"`
+	Title       string      `json:"title,omitempty"`
+	Parent      *Parent     `json:"parent,omitempty"`
+	Network     string      `json:"network,omitempty"`
+	RedFlags    []string    `json:"redFlags,omitempty"`
+	CheckedRPCs []RPCDetail `json:"checkedRPCs,omitempty"`
 }
 
 type Currency struct {
@@ -44,7 +39,7 @@ type Currency struct {
 type Explorer struct {
 	Name     string `json:"name"`
 	URL      string `json:"url"`
-	Standard string `json:"standard"` // e.g., "EIP3091"
+	Standard string `json:"standard"`
 	Icon     string `json:"icon,omitempty"`
 }
 
@@ -53,12 +48,12 @@ type Ens struct {
 }
 
 type Feature struct {
-	Name string `json:"name"` // e.g., "EIP155", "EIP1559"
+	Name string `json:"name"`
 }
 
 type Parent struct {
-	Type    string   `json:"type"`  // e.g., "L2"
-	Chain   string   `json:"chain"` // e.g., "eip155-1"
+	Type    string   `json:"type"`
+	Chain   string   `json:"chain"`
 	Bridges []Bridge `json:"bridges,omitempty"`
 }
 

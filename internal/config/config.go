@@ -36,8 +36,8 @@ type CheckerConfig struct {
 	CheckInterval    time.Duration `yaml:"check_interval" env-default:"15m"`
 	CheckTimeout     time.Duration `yaml:"check_timeout" env-default:"5s"`
 	MaxWorkers       int           `yaml:"max_workers" env-default:"10"`
-	CacheTTL         time.Duration `yaml:"cache_ttl" env-default:"30m"`       // Cache TTL for checked RPCs
-	RunOnStartup     bool          `yaml:"run_on_startup" env-default:"true"` // Correctly added field
+	CacheTTL         time.Duration `yaml:"cache_ttl" env-default:"30m"`
+	RunOnStartup     bool          `yaml:"run_on_startup" env-default:"true"`
 	UserAgent        string        `yaml:"user_agent" env-default:"chainlist-parser/1.0"`
 	ChainlistDataURL string        `yaml:"chainlist_data_url" env-default:"https://chainid.network/chains.json"`
 }
@@ -55,9 +55,6 @@ type ChainlistConfig struct {
 
 // Load reads configuration from file and environment variables.
 func Load(configPath string) (*Config, error) {
-	// Implementation for loading config (using Viper or similar)
-	// ... (this part is assumed to exist and work)
-	// For example purposes, return a default config:
 	cfg := &Config{
 		App: AppConfig{
 			Name:    "chainlist-parser",
@@ -75,7 +72,7 @@ func Load(configPath string) (*Config, error) {
 			CheckTimeout:     5 * time.Second,
 			MaxWorkers:       10,
 			CacheTTL:         30 * time.Minute,
-			RunOnStartup:     true, // Default value
+			RunOnStartup:     true,
 			UserAgent:        "chainlist-parser/1.0",
 			ChainlistDataURL: "https://chainid.network/chains.json",
 		},
@@ -87,11 +84,8 @@ func Load(configPath string) (*Config, error) {
 			URL: "https://chainid.network/chains.json",
 		},
 	}
-	// Add proper loading logic here (e.g., Viper)
 	return cfg, nil
 }
-
-// Helper methods to get durations
 
 func (c CheckerConfig) GetTimeout() time.Duration {
 	return c.CheckTimeout

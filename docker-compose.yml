@@ -10,10 +10,10 @@ services:
       # Map host port 8080 to container port 8080 (or the one defined in config)
       - "8080:8080"
     # volumes:
-      # Mount local configs for easier development/testing if needed
+      # Mount local config for easier development/testing if needed
       # - type: bind
-      #   source: ./configs
-      #   target: /app/configs
+      #   source: ./config
+      #   target: /app/config
     # environment:
       # Example of overriding config via environment variables (Viper)
       # SERVER_PORT: 8081

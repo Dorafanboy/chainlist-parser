@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/valyala/fasthttp"
-	"go.uber.org/zap"
-
 	"chainlist-parser/internal/config"
 	"chainlist-parser/internal/entity"
 	"chainlist-parser/internal/usecase"
+
+	"github.com/valyala/fasthttp"
+	"go.uber.org/zap"
 )
 
 // Compile-time check
@@ -41,8 +41,6 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 
 	r.logger.Debug("Fetching chains from Chainlist", zap.String("url", r.url))
 
-	// fasthttp doesn't directly support context cancellation for a single request easily.
-	// You might need a more complex setup with timeouts or request abortion if strict context handling is needed here.
 	err := r.client.Do(req, resp)
 	if err != nil {
 		r.logger.Error("Failed to execute request to Chainlist", zap.Error(err))
