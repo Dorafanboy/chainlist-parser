@@ -32,7 +32,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to setup logger: %v", err)
 	}
-	defer logger.Sync()
+	defer func(logger *zap.Logger) {
+		err := logger.Sync()
+		if err != nil {
+			log.Fatalf("Failed to sync logger: %v", err)
+		}
+	}(logger)
 	logger.Info("Logger initialized", zap.Any("config", cfg.Logger))
 
 	rootCtx, cancel := context.WithCancel(context.Background())
