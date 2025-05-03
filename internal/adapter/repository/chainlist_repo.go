@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"chainlist-parser/internal/config"
 	"chainlist-parser/internal/entity"
@@ -38,10 +40,24 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 
 	req.SetRequestURI(r.url)
 	req.Header.SetMethod(fasthttp.MethodGet)
+	req.Header.Set(fasthttp.HeaderAcceptEncoding, "gzip")
 
-	r.logger.Debug("Fetching chains from Chainlist", zap.String("url", r.url))
+	deadline, hasDeadline := ctx.Deadline()
+	timeout := 15 * time.Second // Default timeout
+	if hasDeadline {
+		requestTimeout := time.Until(deadline)
+		if requestTimeout > 0 && requestTimeout < timeout {
+			timeout = requestTimeout
+		}
+	}
 
-	err := r.client.Do(req, resp)
+	r.logger.Debug(
+		"Fetching chains from Chainlist",
+		zap.String("url", r.url),
+		zap.Duration("timeout", timeout),
+	)
+
+	err := r.client.DoTimeout(req, resp, timeout)
 	if err != nil {
 		r.logger.Error("Failed to execute request to Chainlist", zap.Error(err))
 		return nil, fmt.Errorf("failed to fetch from chainlist: %w", err)
@@ -54,8 +70,21 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 		return nil, fmt.Errorf("chainlist returned status %d", resp.StatusCode())
 	}
 
+	var body []byte
+	contentEncoding := resp.Header.Peek(fasthttp.HeaderContentEncoding)
+	if bytes.EqualFold(contentEncoding, []byte("gzip")) {
+		r.logger.Debug("Received gzipped response from Chainlist")
+		body, err = resp.BodyGunzip()
+		if err != nil {
+			r.logger.Error("Failed to gunzip Chainlist response body", zap.Error(err))
+			return nil, fmt.Errorf("failed to decompress chainlist response: %w", err)
+		}
+	} else {
+		body = resp.Body()
+	}
+
 	var chains []entity.Chain
-	err = json.Unmarshal(resp.Body(), &chains)
+	err = json.Unmarshal(body, &chains)
 	if err != nil {
 		r.logger.Error("Failed to unmarshal Chainlist response", zap.Error(err))
 		return nil, fmt.Errorf("failed to parse chainlist response: %w", err)

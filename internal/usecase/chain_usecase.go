@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"chainlist-parser/internal/config"
@@ -21,9 +22,12 @@ type chainUseCase struct {
 	rpcChecker RPCChecker
 	logger     *zap.Logger
 	cfg        config.Config
+	rootCtx    context.Context
+	isChecking *atomic.Bool
 }
 
 func NewChainUseCase(
+	rootCtx context.Context,
 	chainRepo ChainRepository,
 	cacheRepo CacheRepository,
 	rpcChecker RPCChecker,
@@ -36,21 +40,45 @@ func NewChainUseCase(
 		rpcChecker: rpcChecker,
 		logger:     logger.Named("ChainUseCase"),
 		cfg:        cfg,
+		rootCtx:    rootCtx,
+		isChecking: new(atomic.Bool),
 	}
 	go uc.startBackgroundChecker()
 	return uc
 }
 
-// GetAllChainsChecked gets all chains, potentially from cache or by fetching and checking.
+// GetAllChainsChecked gets all chains.
 func (uc *chainUseCase) GetAllChainsChecked(ctx context.Context) ([]entity.Chain, error) {
-	chains, err := uc.cacheRepo.GetChains(ctx)
-	if err == nil && len(chains) > 0 {
-		uc.logger.Debug("Cache hit for all chains")
-		return chains, nil
+	cachedChains, err := uc.cacheRepo.GetChains(ctx)
+	if err == nil && len(cachedChains) > 0 {
+		uc.logger.Debug("Cache hit for all chains (potentially checked)")
+		return cachedChains, nil
 	}
-	uc.logger.Debug("Cache miss or error for all chains", zap.Error(err))
+	if err != nil {
+		uc.logger.Warn("Cache error when getting all chains", zap.Error(err))
+	}
+	uc.logger.Debug("Cache miss for all chains, fetching raw data...")
 
-	return uc.fetchCheckAndCacheAllChains(ctx)
+	rawChains, fetchErr := uc.chainRepo.GetAllChains(ctx)
+	if fetchErr != nil {
+		uc.logger.Error("Failed to fetch raw chain data from repository", zap.Error(fetchErr))
+		return nil, fetchErr
+	}
+
+	if len(rawChains) > 0 {
+		if uc.isChecking.CompareAndSwap(false, true) {
+			uc.logger.Info("Starting background check process after cache miss")
+			go func(chainsToCheck []entity.Chain) {
+				defer uc.isChecking.Store(false)
+				uc.performRpcChecksAndUpdateCache(uc.rootCtx, chainsToCheck)
+			}(rawChains)
+		} else {
+			uc.logger.Debug("Background check already in progress, skipping new check start")
+		}
+	}
+
+	uc.logger.Info("Fetched raw chains, returning immediately", zap.Int("count", len(rawChains)))
+	return rawChains, nil
 }
 
 // GetCheckedRPCsForChain gets checked RPC details for a specific chain, potentially from cache.
@@ -60,14 +88,20 @@ func (uc *chainUseCase) GetCheckedRPCsForChain(ctx context.Context, chainID int6
 		uc.logger.Debug("Cache hit for chain checked RPCs", zap.Int64("chainId", chainID))
 		return checkedRPCs, nil
 	}
-	uc.logger.Debug("Cache miss or error for chain checked RPCs", zap.Int64("chainId", chainID), zap.Error(err))
-
-	uc.logger.Debug("Fetching all chains to find specific chain info for checking", zap.Int64("chainId", chainID))
-	rawChains, err := uc.chainRepo.GetAllChains(ctx)
 	if err != nil {
+		uc.logger.Warn("Cache error when getting checked RPCs", zap.Int64("chainId", chainID), zap.Error(err))
+	}
+	uc.logger.Debug("Cache miss for chain checked RPCs", zap.Int64("chainId", chainID))
+
+	uc.logger.Debug(
+		"Fetching all chains from repository to find specific chain info",
+		zap.Int64("chainId", chainID),
+	)
+	rawChains, fetchErr := uc.chainRepo.GetAllChains(ctx)
+	if fetchErr != nil {
 		uc.logger.Error("Failed to get all chains from repo while looking for specific chain RPCs",
-			zap.Int64("chainId", chainID), zap.Error(err))
-		return nil, err
+			zap.Int64("chainId", chainID), zap.Error(fetchErr))
+		return nil, fetchErr
 	}
 
 	var foundChain *entity.Chain
@@ -79,40 +113,48 @@ func (uc *chainUseCase) GetCheckedRPCsForChain(ctx context.Context, chainID int6
 	}
 
 	if foundChain == nil {
-		uc.logger.Warn("Chain not found in repository data", zap.Int64("chainId", chainID))
+		uc.logger.Warn(
+			"Chain not found in repository data (after fetching all)",
+			zap.Int64("chainId", chainID),
+		)
 		return nil, nil
 	}
 
-	uc.logger.Debug("Found chain, checking its RPCs", zap.Int64("chainId", chainID), zap.Int("rpcCount", len(foundChain.RPC)))
+	uc.logger.Debug(
+		"Found chain in full list, checking its RPCs",
+		zap.Int64("chainId", chainID),
+		zap.Int("rpcCount", len(foundChain.RPC)),
+	)
 
 	checkerTimeout := uc.cfg.Checker.GetTimeout()
 	chainCheckedRPCs := uc.checkChainRPCs(checkerTimeout, foundChain.RPC)
-	uc.logger.Debug("Finished checking RPCs for chain", zap.Int64("chainId", chainID), zap.Int("checkedCount", len(chainCheckedRPCs)))
+	uc.logger.Debug(
+		"Finished checking RPCs for specific chain (from GetAllChains path)",
+		zap.Int64("chainId", chainID),
+		zap.Int("checkedCount",
+			len(chainCheckedRPCs)),
+	)
 
 	cacheTTL := uc.cfg.Checker.GetCacheTTL()
-	err = uc.cacheRepo.SetChainCheckedRPCs(ctx, chainID, chainCheckedRPCs, cacheTTL)
-	if err != nil {
-		uc.logger.Error("Failed to cache checked RPCs for chain", zap.Int64("chainId", chainID), zap.Error(err))
+	if cacheErr := uc.cacheRepo.SetChainCheckedRPCs(ctx, chainID, chainCheckedRPCs, cacheTTL); cacheErr != nil {
+		uc.logger.Error(
+			"Failed to cache checked RPCs for specific chain",
+			zap.Int64("chainId", chainID),
+			zap.Error(cacheErr),
+		)
 	}
 
 	return chainCheckedRPCs, nil
 }
 
-// fetchCheckAndCacheAllChains fetches from source, checks RPCs, and updates cache.
-func (uc *chainUseCase) fetchCheckAndCacheAllChains(ctx context.Context) ([]entity.Chain, error) {
-	uc.logger.Info("Starting to fetch, check, and cache all chains")
-
-	rawChains, err := uc.chainRepo.GetAllChains(ctx)
-	if err != nil {
-		uc.logger.Error("Failed to fetch raw chain data", zap.Error(err))
-		return nil, err
-	}
+// performRpcChecksAndUpdateCache performs RPC checks for the given chains and updates the cache.
+func (uc *chainUseCase) performRpcChecksAndUpdateCache(ctx context.Context, rawChains []entity.Chain) {
+	uc.logger.Info("Starting background RPC checks and cache update", zap.Int("chainCount", len(rawChains)))
 
 	if len(rawChains) == 0 {
-		uc.logger.Warn("Fetched 0 chains from repository")
-		return []entity.Chain{}, nil
+		uc.logger.Warn("performRpcChecksAndUpdateCache called with 0 chains")
+		return
 	}
-	uc.logger.Debug("Fetched raw chains", zap.Int("count", len(rawChains)))
 
 	updatedChains := make([]entity.Chain, len(rawChains))
 	resultsChan := make(chan struct {
@@ -122,44 +164,85 @@ func (uc *chainUseCase) fetchCheckAndCacheAllChains(ctx context.Context) ([]enti
 	var wg sync.WaitGroup
 	checkerTimeout := uc.cfg.Checker.GetTimeout()
 
+	maxWorkers := uc.cfg.Checker.MaxWorkers
+	if maxWorkers <= 0 {
+		maxWorkers = 10
+	}
+	workerSem := make(chan struct{}, maxWorkers)
+
 	for i, chain := range rawChains {
 		wg.Add(1)
+		workerSem <- struct{}{}
 		go func(index int, c entity.Chain) {
-			defer wg.Done()
+			defer func() {
+				<-workerSem
+				wg.Done()
+			}()
+
+			select {
+			case <-ctx.Done():
+				uc.logger.Info(
+					"Context cancelled before starting RPC check in background worker",
+					zap.Int("chainIndex", index),
+				)
+				return
+			default:
+			}
+
 			checkedRPCs := uc.checkChainRPCs(checkerTimeout, c.RPC)
-			resultsChan <- struct {
+			select {
+			case resultsChan <- struct {
 				index       int
 				checkedRPCs []entity.RPCDetail
-			}{index: index, checkedRPCs: checkedRPCs}
+			}{index: index, checkedRPCs: checkedRPCs}:
+			case <-ctx.Done():
+				uc.logger.Info(
+					"Context cancelled before sending RPC check result",
+					zap.Int("chainIndex", index),
+				)
+				return
+			}
 		}(i, chain)
 	}
 
 	go func() {
 		wg.Wait()
 		close(resultsChan)
+		close(workerSem)
 	}()
 
 	for result := range resultsChan {
-		updatedChains[result.index] = rawChains[result.index]
-		updatedChains[result.index].CheckedRPCs = result.checkedRPCs
-	}
-
-	uc.logger.Info("Finished checking chains", zap.Int("totalChains", len(updatedChains)))
-
-	cacheTTL := uc.cfg.Checker.GetCacheTTL()
-	err = uc.cacheRepo.SetChains(ctx, updatedChains, cacheTTL)
-	if err != nil {
-		uc.logger.Error("Failed to cache checked chains (full list)", zap.Error(err))
-	}
-
-	for _, chain := range updatedChains {
-		err = uc.cacheRepo.SetChainCheckedRPCs(ctx, chain.ChainID, chain.CheckedRPCs, cacheTTL)
-		if err != nil {
-			uc.logger.Error("Failed to cache individual chain checked RPCs", zap.Int64("chainId", chain.ChainID), zap.Error(err))
+		select {
+		case <-ctx.Done():
+			uc.logger.Info("Context cancelled while collecting RPC check results")
+			return
+		default:
+			if result.index >= 0 && result.index < len(rawChains) {
+				updatedChains[result.index] = rawChains[result.index]
+				updatedChains[result.index].CheckedRPCs = result.checkedRPCs
+			} else {
+				uc.logger.Warn(
+					"Received result with out-of-bounds index",
+					zap.Int("index", result.index),
+					zap.Int("len", len(rawChains)),
+				)
+			}
 		}
 	}
 
-	return updatedChains, nil
+	if ctx.Err() != nil {
+		uc.logger.Info("Context cancelled before caching results in background task")
+		return
+	}
+
+	uc.logger.Info("Finished checking chains in background task", zap.Int("totalChains", len(updatedChains)))
+
+	cacheTTL := uc.cfg.Checker.GetCacheTTL()
+	if err := uc.cacheRepo.SetChains(ctx, updatedChains, cacheTTL); err != nil {
+		uc.logger.Error("Failed to cache checked chains in background task", zap.Error(err))
+	}
+
+	uc.logger.Info("Background RPC check and cache update finished.")
 }
 
 // checkChainRPCs checks a list of RPC URLs for a single chain and returns detailed results.
@@ -171,33 +254,43 @@ func (uc *chainUseCase) checkChainRPCs(timeout time.Duration, rpcs []string) []e
 	checkedRPCs := make([]entity.RPCDetail, len(rpcs))
 	var wg sync.WaitGroup
 
+	maxWorkers := uc.cfg.Checker.MaxWorkers
+	if maxWorkers <= 0 {
+		maxWorkers = 10
+	}
+	workerSem := make(chan struct{}, maxWorkers)
+
 	for i, rpcURL := range rpcs {
 		wg.Add(1)
+		workerSem <- struct{}{}
 		go func(index int, url string) {
-			defer wg.Done()
+			defer func() {
+				<-workerSem
+				wg.Done()
+			}()
 
 			detail := entity.RPCDetail{URL: url}
 
 			if strings.HasPrefix(url, "https://") {
-				detail.Protocol = "https"
+				detail.Protocol = entity.ProtocolHTTPS
 			} else if strings.HasPrefix(url, "http://") {
-				detail.Protocol = "http"
+				detail.Protocol = entity.ProtocolHTTP
 			} else if strings.HasPrefix(url, "wss://") {
-				detail.Protocol = "wss"
-				checkedRPCs[index] = detail
-				return
+				detail.Protocol = entity.ProtocolWSS
+			} else if strings.HasPrefix(url, "ws://") {
+				detail.Protocol = entity.ProtocolWS
 			} else {
-				detail.Protocol = "unknown"
+				detail.Protocol = entity.ProtocolUnknown
 				notWorking := false
 				detail.IsWorking = &notWorking
 				checkedRPCs[index] = detail
 				return
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			checkCtx, cancel := context.WithTimeout(uc.rootCtx, timeout)
 			defer cancel()
 
-			isWorking, latency, err := uc.rpcChecker.CheckRPC(ctx, url)
+			isWorking, latency, err := uc.rpcChecker.CheckRPC(checkCtx, url)
 			if err != nil {
 				uc.logger.Debug("RPC check failed", zap.String("rpc", url), zap.Error(err))
 				notWorking := false
@@ -207,7 +300,12 @@ func (uc *chainUseCase) checkChainRPCs(timeout time.Duration, rpcs []string) []e
 				if isWorking {
 					latencyMs := latency.Milliseconds()
 					detail.LatencyMs = &latencyMs
-					uc.logger.Debug("RPC is working", zap.String("rpc", url), zap.Duration("latency", latency))
+					uc.logger.Debug(
+						"RPC is working",
+						zap.String("rpc", url),
+						zap.Duration("latency",
+							latency),
+					)
 				} else {
 					uc.logger.Debug("RPC is not working", zap.String("rpc", url))
 				}
@@ -221,7 +319,7 @@ func (uc *chainUseCase) checkChainRPCs(timeout time.Duration, rpcs []string) []e
 	return checkedRPCs
 }
 
-// startBackgroundChecker periodically re-checks all chains.
+// startBackgroundChecker periodically re-checks all chains using uc.rootCtx.
 func (uc *chainUseCase) startBackgroundChecker() {
 	interval := uc.cfg.Checker.GetCheckInterval()
 	if interval <= 0 {
@@ -236,20 +334,37 @@ func (uc *chainUseCase) startBackgroundChecker() {
 	if uc.cfg.Checker.RunOnStartup {
 		go func() {
 			uc.logger.Info("Running initial background check...")
-			_, err := uc.fetchCheckAndCacheAllChains(context.Background())
+			rawChains, err := uc.chainRepo.GetAllChains(uc.rootCtx)
 			if err != nil {
-				uc.logger.Error("Error during initial background check", zap.Error(err))
+				if uc.rootCtx.Err() != nil {
+					uc.logger.Warn("Initial background check fetch cancelled due to application shutdown")
+				} else {
+					uc.logger.Error("Error fetching chains during initial background check", zap.Error(err))
+				}
+				return
 			}
+			uc.performRpcChecksAndUpdateCache(uc.rootCtx, rawChains)
 		}()
-	} else {
-		uc.logger.Info("Skipping initial background check (RunOnStartup is false)")
 	}
 
-	for range ticker.C {
-		uc.logger.Info("Background checker running...")
-		_, err := uc.fetchCheckAndCacheAllChains(context.Background())
-		if err != nil {
-			uc.logger.Error("Error during background check", zap.Error(err))
+	for {
+		select {
+		case <-ticker.C:
+			uc.logger.Info("Background checker tick: running check...")
+			rawChains, err := uc.chainRepo.GetAllChains(uc.rootCtx)
+			if err != nil {
+				if uc.rootCtx.Err() != nil {
+					uc.logger.Warn("Periodic background check fetch cancelled due to application shutdown")
+				} else {
+					uc.logger.Error("Error fetching chains during periodic background check", zap.Error(err))
+				}
+				continue
+			}
+			uc.performRpcChecksAndUpdateCache(uc.rootCtx, rawChains)
+
+		case <-uc.rootCtx.Done():
+			uc.logger.Info("Background checker stopping due to context cancellation.")
+			return
 		}
 	}
 }

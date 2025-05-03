@@ -1,90 +1,101 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"strings"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 // Config holds all configuration for the application.
 type Config struct {
-	App       AppConfig       `yaml:"app"`
-	Server    ServerConfig    `yaml:"server"`
-	Logger    LoggerConfig    `yaml:"logger"`
-	Checker   CheckerConfig   `yaml:"checker"`
-	Cache     CacheConfig     `yaml:"cache"`
-	Chainlist ChainlistConfig `yaml:"chainlist"`
+	App       AppConfig       `mapstructure:"app"`
+	Server    ServerConfig    `mapstructure:"server"`
+	Logger    LoggerConfig    `mapstructure:"logger"`
+	Checker   CheckerConfig   `mapstructure:"checker"`
+	Cache     CacheConfig     `mapstructure:"cache"`
+	Chainlist ChainlistConfig `mapstructure:"chainlist"`
 }
 
 // AppConfig holds application-level configuration.
 type AppConfig struct {
-	Name    string `yaml:"name" env-default:"chainlist-parser"`
-	Version string `yaml:"version" env-default:"1.0.0"`
+	Name    string `mapstructure:"name"`
+	Version string `mapstructure:"version"`
 }
 
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
-	Port string `yaml:"port" env-default:"8080"`
+	Port string `mapstructure:"port"`
 }
 
 // LoggerConfig holds logging configuration.
 type LoggerConfig struct {
-	Level    string `yaml:"level" env-default:"info"`
-	Encoding string `yaml:"encoding" env-default:"json"`
+	Level    string `mapstructure:"level"`
+	Encoding string `mapstructure:"encoding"`
 }
 
 // CheckerConfig holds settings related to the RPC checking process.
 type CheckerConfig struct {
-	CheckInterval    time.Duration `yaml:"check_interval" env-default:"15m"`
-	CheckTimeout     time.Duration `yaml:"check_timeout" env-default:"5s"`
-	MaxWorkers       int           `yaml:"max_workers" env-default:"10"`
-	CacheTTL         time.Duration `yaml:"cache_ttl" env-default:"30m"`
-	RunOnStartup     bool          `yaml:"run_on_startup" env-default:"true"`
-	UserAgent        string        `yaml:"user_agent" env-default:"chainlist-parser/1.0"`
-	ChainlistDataURL string        `yaml:"chainlist_data_url" env-default:"https://chainid.network/chains.json"`
+	CheckInterval time.Duration `mapstructure:"check_interval"`
+	CheckTimeout  time.Duration `mapstructure:"check_timeout"`
+	MaxWorkers    int           `mapstructure:"max_workers"`
+	CacheTTL      time.Duration `mapstructure:"cache_ttl"`
+	RunOnStartup  bool          `mapstructure:"run_on_startup"`
 }
 
 // CacheConfig holds settings for the caching layer.
 type CacheConfig struct {
-	DefaultExpiration time.Duration `yaml:"default_expiration" env-default:"30m"`
-	CleanupInterval   time.Duration `yaml:"cleanup_interval" env-default:"1h"`
+	DefaultExpiration time.Duration `mapstructure:"default_expiration"`
+	CleanupInterval   time.Duration `mapstructure:"cleanup_interval"`
 }
 
 // ChainlistConfig holds configuration for the Chainlist data source.
 type ChainlistConfig struct {
-	URL string `yaml:"url" env-default:"https://chainid.network/chains.json"`
+	URL string `mapstructure:"url"`
 }
 
 // Load reads configuration from file and environment variables.
 func Load(configPath string) (*Config, error) {
-	cfg := &Config{
-		App: AppConfig{
-			Name:    "chainlist-parser",
-			Version: "1.0.0",
-		},
-		Server: ServerConfig{
-			Port: "8080",
-		},
-		Logger: LoggerConfig{
-			Level:    "info",
-			Encoding: "json",
-		},
-		Checker: CheckerConfig{
-			CheckInterval:    15 * time.Minute,
-			CheckTimeout:     5 * time.Second,
-			MaxWorkers:       10,
-			CacheTTL:         30 * time.Minute,
-			RunOnStartup:     true,
-			UserAgent:        "chainlist-parser/1.0",
-			ChainlistDataURL: "https://chainid.network/chains.json",
-		},
-		Cache: CacheConfig{
-			DefaultExpiration: 30 * time.Minute,
-			CleanupInterval:   1 * time.Hour,
-		},
-		Chainlist: ChainlistConfig{
-			URL: "https://chainid.network/chains.json",
-		},
+	v := viper.New()
+
+	v.SetDefault("app.name", "chainlist-parser")
+	v.SetDefault("app.version", "1.0.0")
+	v.SetDefault("server.port", "8080")
+	v.SetDefault("logger.level", "info")
+	v.SetDefault("logger.encoding", "json")
+	v.SetDefault("checker.check_interval", "15m")
+	v.SetDefault("checker.check_timeout", "5s")
+	v.SetDefault("checker.max_workers", 20)
+	v.SetDefault("checker.cache_ttl", "30m")
+	v.SetDefault("checker.run_on_startup", true)
+	v.SetDefault("cache.default_expiration", "30m")
+	v.SetDefault("cache.cleanup_interval", "1h")
+	v.SetDefault("chainlist.url", "https://chainid.network/chains.json")
+
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+	v.AddConfigPath(configPath)
+	v.AddConfigPath(".")
+
+	if err := v.ReadInConfig(); err != nil {
+		var configFileNotFoundError viper.ConfigFileNotFoundError
+		if errors.As(err, &configFileNotFoundError) {
+			fmt.Printf("Warning: Config file not found in %s or '.', using defaults/env vars\n", configPath)
+		}
 	}
-	return cfg, nil
+
+	v.SetEnvPrefix("CHAINLIST_PARSER")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	return &cfg, nil
 }
 
 func (c CheckerConfig) GetTimeout() time.Duration {

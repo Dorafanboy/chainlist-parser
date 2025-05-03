@@ -1,7 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"chainlist-parser/internal/adapter/handler/http"
 	"chainlist-parser/internal/adapter/repository"
@@ -28,13 +34,16 @@ func main() {
 	defer logger.Sync()
 	logger.Info("Logger initialized", zap.Any("config", cfg.Logger))
 
+	rootCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	logger.Info("Initializing dependencies...")
 
 	chainlistRepo := repository.NewChainlistRepo(cfg.Chainlist, logger)
 	cacheRepo := repository.NewGoCacheRepo(*cfg, logger)
 	rpcChecker := repository.NewRPCChecker(logger)
 
-	chainUseCase := usecase.NewChainUseCase(chainlistRepo, cacheRepo, rpcChecker, logger, *cfg)
+	chainUseCase := usecase.NewChainUseCase(rootCtx, chainlistRepo, cacheRepo, rpcChecker, logger, *cfg)
 	chainHandler := http.NewChainHandler(chainUseCase, logger)
 
 	logger.Info("Setting up HTTP router...")
@@ -58,9 +67,36 @@ func main() {
 	}
 
 	serverAddr := ":" + cfg.Server.Port
-	logger.Info("Starting HTTP server", zap.String("address", serverAddr))
-
-	if err := fasthttp.ListenAndServe(serverAddr, loggingMiddleware(r.Handler)); err != nil {
-		logger.Fatal("Failed to start server", zap.Error(err))
+	server := &fasthttp.Server{
+		Handler: loggingMiddleware(r.Handler),
 	}
+
+	go func() {
+		logger.Info("Starting HTTP server", zap.String("address", serverAddr))
+		if err := server.ListenAndServe(serverAddr); err != nil && !errors.Is(err, fasthttp.ErrConnectionClosed) {
+			logger.Fatal("HTTP server ListenAndServe error", zap.Error(err))
+		}
+	}()
+
+	gracefulShutdown(server, cancel, logger)
+
+	time.Sleep(1 * time.Second)
+	logger.Info("Application shut down finished.")
+}
+
+func gracefulShutdown(server *fasthttp.Server, cancel context.CancelFunc, logger *zap.Logger) {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+	logger.Info("Received shutdown signal", zap.String("signal", sig.String()))
+
+	cancel()
+	logger.Info("Signaling background tasks to stop (context cancelled)...")
+
+	logger.Info("Shutting down HTTP server...")
+	if err := server.Shutdown(); err != nil {
+		logger.Error("HTTP server shutdown failed", zap.Error(err))
+	}
+
+	logger.Info("HTTP server shut down complete.")
 }

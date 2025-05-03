@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"chainlist-parser/internal/entity"
 	"chainlist-parser/internal/usecase"
 
 	"github.com/valyala/fasthttp"
@@ -37,44 +38,57 @@ func NewChainHandler(uc usecase.ChainUseCase, logger *zap.Logger) *ChainHandler 
 	}
 }
 
-// GetAllChains handles requests for all chains with their checked RPC details.
+// GetAllChains handles requests for all chains.
 func (h *ChainHandler) GetAllChains(ctx *fasthttp.RequestCtx) {
 	chains, err := h.useCase.GetAllChainsChecked(ctx)
 	if err != nil {
-		h.logger.Error("Failed to get all chains checked data", zap.Error(err))
+		h.logger.Error("Failed to get all chains data from use case", zap.Error(err))
 		ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 		return
 	}
 
-	responseChains := make([]ChainApiResponse, 0, len(chains))
-	for _, chain := range chains {
+	responseChains := make([]ChainApiResponse, len(chains))
+	for i, chain := range chains {
 		httpEndpoints := make([]string, 0)
 		wssEndpoints := make([]string, 0)
-		for _, rpc := range chain.CheckedRPCs {
-			if strings.HasPrefix(rpc.URL, "wss://") || strings.HasPrefix(rpc.URL, "ws://") {
-				wssEndpoints = append(wssEndpoints, rpc.URL)
-			} else if rpc.IsWorking != nil && *rpc.IsWorking {
-				httpEndpoints = append(httpEndpoints, rpc.URL)
+
+		if len(chain.CheckedRPCs) > 0 {
+			h.logger.Debug("Processing checked RPCs for chain", zap.Int64("chainId", chain.ChainID))
+			for _, rpc := range chain.CheckedRPCs {
+				if rpc.Protocol == entity.ProtocolWSS || rpc.Protocol == entity.ProtocolWS {
+					wssEndpoints = append(wssEndpoints, rpc.URL)
+				} else if rpc.IsWorking != nil && *rpc.IsWorking {
+					httpEndpoints = append(httpEndpoints, rpc.URL)
+				}
+			}
+		} else {
+			h.logger.Debug("Processing raw RPCs for chain", zap.Int64("chainId", chain.ChainID))
+			for _, rawRpcURL := range chain.RPC {
+				if strings.HasPrefix(rawRpcURL, "wss://") || strings.HasPrefix(rawRpcURL, "ws://") {
+					wssEndpoints = append(wssEndpoints, rawRpcURL)
+				} else if strings.HasPrefix(rawRpcURL, "https://") || strings.HasPrefix(rawRpcURL, "http://") {
+					httpEndpoints = append(httpEndpoints, rawRpcURL)
+				}
 			}
 		}
 
-		if len(httpEndpoints) > 0 || len(wssEndpoints) > 0 {
-			responseChains = append(responseChains, ChainApiResponse{
-				ChainID:      chain.ChainID,
-				Name:         chain.Name,
-				NativeSymbol: chain.Currency.Symbol,
-				RPCEndpoints: RPCResponse{
-					HTTP: httpEndpoints,
-					WSS:  wssEndpoints,
-				},
-			})
+		responseChains[i] = ChainApiResponse{
+			ChainID:      chain.ChainID,
+			Name:         chain.Name,
+			NativeSymbol: chain.Currency.Symbol,
+			RPCEndpoints: RPCResponse{
+				HTTP: httpEndpoints,
+				WSS:  wssEndpoints,
+			},
 		}
 	}
 
 	ctx.SetContentType("application/json")
 	err = json.NewEncoder(ctx).Encode(responseChains)
 	if err != nil {
+		// Log error, but headers might already be sent
 		h.logger.Error("Failed to encode chains response", zap.Error(err))
+		// Avoid writing ctx.Error here as response likely started
 	}
 }
 
@@ -118,7 +132,10 @@ func (h *ChainHandler) GetChainRPCs(ctx *fasthttp.RequestCtx) {
 	}
 
 	if len(httpEndpoints) == 0 && len(wssEndpoints) == 0 {
-		h.logger.Warn("No working HTTP/S or any WSS endpoints found for chain after filtering", zap.Int64("chainId", chainID))
+		h.logger.Warn(
+			"No working HTTP/S or any WSS endpoints found for chain after filtering",
+			zap.Int64("chainId", chainID),
+		)
 		ctx.Error("Not Found", fasthttp.StatusNotFound)
 		return
 	}

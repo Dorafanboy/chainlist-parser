@@ -54,7 +54,10 @@ func (r *goCacheRepo) GetChains(ctx context.Context) ([]entity.Chain, error) {
 			r.logger.Debug("Cache hit", zap.String("key", key))
 			return chains, nil
 		}
-		r.logger.Warn("Cache data type mismatch for key", zap.String("key", key), zap.Any("type", fmt.Sprintf("%T", x)))
+		r.logger.Warn(
+			"Cache data type mismatch for key",
+			zap.String("key", key), zap.Any("type", fmt.Sprintf("%T", x)),
+		)
 	}
 	r.logger.Debug("Cache miss", zap.String("key", key))
 	return nil, nil
@@ -79,14 +82,23 @@ func (r *goCacheRepo) GetChainCheckedRPCs(ctx context.Context, chainID int64) ([
 			r.logger.Debug("Cache hit", zap.String("key", key))
 			return rpcs, nil
 		}
-		r.logger.Warn("Cache data type mismatch for key", zap.String("key", key), zap.Any("type", fmt.Sprintf("%T", x)))
+		r.logger.Warn(
+			"Cache data type mismatch for key",
+			zap.String("key", key),
+			zap.Any("type", fmt.Sprintf("%T", x)),
+		)
 	}
 	r.logger.Debug("Cache miss", zap.String("key", key))
 	return nil, nil
 }
 
 // SetChainCheckedRPCs caches the list of checked RPC details for a specific chain.
-func (r *goCacheRepo) SetChainCheckedRPCs(ctx context.Context, chainID int64, rpcs []entity.RPCDetail, ttl time.Duration) error {
+func (r *goCacheRepo) SetChainCheckedRPCs(
+	ctx context.Context,
+	chainID int64,
+	rpcs []entity.RPCDetail,
+	ttl time.Duration,
+) error {
 	key := r.getChainCheckedRPCsKey(chainID)
 	if ttl <= 0 {
 		ttl = r.fullCfg.Checker.GetCacheTTL()

@@ -1,6 +1,6 @@
 app:
   name: chainlist-parser
-  version: "1.0"
+  version: 1.0.0
 
 # HTTP Server configuration
 server:
@@ -8,7 +8,7 @@ server:
 
 # Logger configuration
 logger:
-  level: "debug" # Log level (debug, info, warn, error, dpanic, panic, fatal)
+  level: "info" # Log level (debug, info, warn, error, dpanic, panic, fatal)
   encoding: "json" # Log encoding (json or console)
 
 # Chainlist data source
@@ -18,11 +18,10 @@ chainlist:
 # RPC Checker configuration
 checker:
   check_interval: "15m" # Check every 15 minutes
-  check_timeout: "10s"   # Timeout for a single RPC check
-  max_workers: 50       # Number of concurrent checker goroutines
+  check_timeout: "5s"   # Timeout for a single RPC check
+  max_workers: 40       # Number of concurrent checker goroutines
   cache_ttl: "30m"      # How long to cache the checked RPC results
   run_on_startup: true  # Check all chains immediately on start?
-  user_agent: "ChainlistParserBot/1.0 (+https://github.com/your-repo)" # Be a good citizen
 
 # Cache configuration
 cache:

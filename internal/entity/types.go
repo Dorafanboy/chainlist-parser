@@ -1,13 +1,36 @@
 package entity
 
+// Protocol defines the type for RPC protocols.
+type Protocol string
+
+// Constants for known protocols.
+const (
+	ProtocolHTTP    Protocol = "http"
+	ProtocolHTTPS   Protocol = "https"
+	ProtocolWS      Protocol = "ws"
+	ProtocolWSS     Protocol = "wss"
+	ProtocolUnknown Protocol = "unknown"
+)
+
+// NetworkType defines the type for network classifications (e.g., mainnet, testnet).
+type NetworkType string
+
+// Constants for known network types.
+const (
+	NetworkMainnet NetworkType = "mainnet"
+	NetworkTestnet NetworkType = "testnet"
+	// Add others as needed
+)
+
 // RPCDetail holds information about a specific RPC endpoint after checking.
 type RPCDetail struct {
-	URL       string `json:"url"`
-	Protocol  string `json:"protocol"`
-	IsWorking *bool  `json:"isWorking"`
-	LatencyMs *int64 `json:"latencyMs,omitempty"`
+	URL       string   `json:"url"`
+	Protocol  Protocol `json:"protocol"`
+	IsWorking *bool    `json:"isWorking"`
+	LatencyMs *int64   `json:"latencyMs,omitempty"`
 }
 
+// Chain represents the data structure for a blockchain network from Chainlist.
 type Chain struct {
 	Name        string      `json:"name"`
 	Chain       string      `json:"chain"`
@@ -25,17 +48,19 @@ type Chain struct {
 	Explorers   []Explorer  `json:"explorers,omitempty"`
 	Title       string      `json:"title,omitempty"`
 	Parent      *Parent     `json:"parent,omitempty"`
-	Network     string      `json:"network,omitempty"`
+	Network     NetworkType `json:"network,omitempty"`
 	RedFlags    []string    `json:"redFlags,omitempty"`
 	CheckedRPCs []RPCDetail `json:"checkedRPCs,omitempty"`
 }
 
+// Currency defines the native currency details of a chain.
 type Currency struct {
 	Name     string `json:"name"`
 	Symbol   string `json:"symbol"`
 	Decimals int    `json:"decimals"`
 }
 
+// Explorer defines details about a block explorer for a chain.
 type Explorer struct {
 	Name     string `json:"name"`
 	URL      string `json:"url"`
@@ -43,20 +68,24 @@ type Explorer struct {
 	Icon     string `json:"icon,omitempty"`
 }
 
+// Ens defines ENS registry details.
 type Ens struct {
 	Registry string `json:"registry"`
 }
 
+// Feature defines a feature supported by a chain.
 type Feature struct {
 	Name string `json:"name"`
 }
 
+// Parent defines details about a parent chain (for L2s).
 type Parent struct {
 	Type    string   `json:"type"`
 	Chain   string   `json:"chain"`
 	Bridges []Bridge `json:"bridges,omitempty"`
 }
 
+// Bridge defines a bridge associated with a parent chain.
 type Bridge struct {
 	URL string `json:"url"`
 }
