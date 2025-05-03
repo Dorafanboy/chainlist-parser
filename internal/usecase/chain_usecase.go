@@ -16,6 +16,7 @@ import (
 // Compile-time check to ensure chainUseCase implements ChainUseCase
 var _ ChainUseCase = (*chainUseCase)(nil)
 
+// chainUseCase implements the ChainUseCase interface orchestrating chain data operations.
 type chainUseCase struct {
 	chainRepo  ChainRepository
 	cacheRepo  CacheRepository
@@ -26,6 +27,7 @@ type chainUseCase struct {
 	isChecking *atomic.Bool
 }
 
+// NewChainUseCase creates a new instance of the chain use case.
 func NewChainUseCase(
 	rootCtx context.Context,
 	chainRepo ChainRepository,
@@ -47,10 +49,10 @@ func NewChainUseCase(
 	return uc
 }
 
-// GetAllChainsChecked gets all chains.
+// GetAllChainsChecked gets all chains, returning cached data or triggering background checks.
 func (uc *chainUseCase) GetAllChainsChecked(ctx context.Context) ([]entity.Chain, error) {
-	cachedChains, err := uc.cacheRepo.GetChains(ctx)
-	if err == nil && len(cachedChains) > 0 {
+	cachedChains, found, err := uc.cacheRepo.GetChains(ctx)
+	if err == nil && found {
 		uc.logger.Debug("Cache hit for all chains (potentially checked)")
 		return cachedChains, nil
 	}
@@ -81,10 +83,10 @@ func (uc *chainUseCase) GetAllChainsChecked(ctx context.Context) ([]entity.Chain
 	return rawChains, nil
 }
 
-// GetCheckedRPCsForChain gets checked RPC details for a specific chain, potentially from cache.
+// GetCheckedRPCsForChain gets checked RPC details for a specific chain, using cache or fetching all chains.
 func (uc *chainUseCase) GetCheckedRPCsForChain(ctx context.Context, chainID int64) ([]entity.RPCDetail, error) {
-	checkedRPCs, err := uc.cacheRepo.GetChainCheckedRPCs(ctx, chainID)
-	if err == nil && len(checkedRPCs) > 0 {
+	checkedRPCs, found, err := uc.cacheRepo.GetChainCheckedRPCs(ctx, chainID)
+	if err == nil && found {
 		uc.logger.Debug("Cache hit for chain checked RPCs", zap.Int64("chainId", chainID))
 		return checkedRPCs, nil
 	}
@@ -245,7 +247,7 @@ func (uc *chainUseCase) performRpcChecksAndUpdateCache(ctx context.Context, rawC
 	uc.logger.Info("Background RPC check and cache update finished.")
 }
 
-// checkChainRPCs checks a list of RPC URLs for a single chain and returns detailed results.
+// checkChainRPCs performs parallel RPC checks for a list of URLs using a worker pool.
 func (uc *chainUseCase) checkChainRPCs(timeout time.Duration, rpcs []string) []entity.RPCDetail {
 	if len(rpcs) == 0 {
 		return nil
@@ -319,7 +321,7 @@ func (uc *chainUseCase) checkChainRPCs(timeout time.Duration, rpcs []string) []e
 	return checkedRPCs
 }
 
-// startBackgroundChecker periodically re-checks all chains using uc.rootCtx.
+// startBackgroundChecker runs a periodic task to fetch and check all chains.
 func (uc *chainUseCase) startBackgroundChecker() {
 	interval := uc.cfg.Checker.GetCheckInterval()
 	if interval <= 0 {

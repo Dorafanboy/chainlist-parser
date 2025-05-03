@@ -19,11 +19,13 @@ import (
 // Compile-time check
 var _ usecase.RPCChecker = (*rpcChecker)(nil)
 
+// rpcChecker implements the RPCChecker interface.
 type rpcChecker struct {
 	client *fasthttp.Client
 	logger *zap.Logger
 }
 
+// NewRPCChecker creates a new RPC checker instance.
 func NewRPCChecker(logger *zap.Logger) usecase.RPCChecker {
 	return &rpcChecker{
 		client: &fasthttp.Client{
@@ -214,6 +216,5 @@ func (c *rpcChecker) validateJSONRPCResponse(rpcURL string, body []byte) (bool, 
 		return false, fmt.Errorf("invalid JSON-RPC structure")
 	}
 
-	// Check passed
 	return true, nil
 }

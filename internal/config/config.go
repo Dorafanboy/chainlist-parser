@@ -98,22 +98,27 @@ func Load(configPath string) (*Config, error) {
 	return &cfg, nil
 }
 
+// GetTimeout returns the configured check timeout duration.
 func (c CheckerConfig) GetTimeout() time.Duration {
 	return c.CheckTimeout
 }
 
+// GetCheckInterval returns the configured check interval duration.
 func (c CheckerConfig) GetCheckInterval() time.Duration {
 	return c.CheckInterval
 }
 
+// GetCacheTTL returns the configured cache TTL duration.
 func (c CheckerConfig) GetCacheTTL() time.Duration {
 	return c.CacheTTL
 }
 
+// GetDefaultExpiration returns the configured default cache expiration.
 func (c CacheConfig) GetDefaultExpiration() time.Duration {
 	return c.DefaultExpiration
 }
 
+// GetCleanupInterval returns the configured cache cleanup interval.
 func (c CacheConfig) GetCleanupInterval() time.Duration {
 	return c.CleanupInterval
 }

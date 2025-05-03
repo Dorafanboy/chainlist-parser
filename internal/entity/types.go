@@ -19,7 +19,6 @@ type NetworkType string
 const (
 	NetworkMainnet NetworkType = "mainnet"
 	NetworkTestnet NetworkType = "testnet"
-	// Add others as needed
 )
 
 // RPCDetail holds information about a specific RPC endpoint after checking.

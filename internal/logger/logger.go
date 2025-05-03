@@ -5,11 +5,12 @@ import (
 	"os"
 
 	"chainlist-parser/internal/config"
-	
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
+// NewLogger creates and configures a new zap logger based on the provided configuration.
 func NewLogger(cfg config.LoggerConfig) (*zap.Logger, error) {
 	logLevel := zap.NewAtomicLevel()
 	if err := logLevel.UnmarshalText([]byte(cfg.Level)); err != nil {

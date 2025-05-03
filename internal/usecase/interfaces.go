@@ -14,9 +14,9 @@ type ChainRepository interface {
 
 // CacheRepository defines the interface for caching checked chain data.
 type CacheRepository interface {
-	GetChains(ctx context.Context) ([]entity.Chain, error)
+	GetChains(ctx context.Context) ([]entity.Chain, bool, error)
 	SetChains(ctx context.Context, chains []entity.Chain, ttl time.Duration) error
-	GetChainCheckedRPCs(ctx context.Context, chainID int64) ([]entity.RPCDetail, error)
+	GetChainCheckedRPCs(ctx context.Context, chainID int64) ([]entity.RPCDetail, bool, error)
 	SetChainCheckedRPCs(ctx context.Context, chainID int64, rpcs []entity.RPCDetail, ttl time.Duration) error
 }
 

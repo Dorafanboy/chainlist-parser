@@ -20,6 +20,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// main is the entry point of the application.
 func main() {
 	cfgPath := "config"
 	cfg, err := config.Load(cfgPath)
@@ -84,6 +85,7 @@ func main() {
 	logger.Info("Application shut down finished.")
 }
 
+// gracefulShutdown waits for termination signals and performs graceful shutdown.
 func gracefulShutdown(server *fasthttp.Server, cancel context.CancelFunc, logger *zap.Logger) {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

@@ -18,12 +18,14 @@ import (
 // Compile-time check
 var _ usecase.ChainRepository = (*chainlistRepo)(nil)
 
+// chainlistRepo implements ChainRepository for fetching data from the Chainlist source.
 type chainlistRepo struct {
 	client *fasthttp.Client
 	url    string
 	logger *zap.Logger
 }
 
+// NewChainlistRepo creates a new Chainlist repository instance.
 func NewChainlistRepo(cfg config.ChainlistConfig, logger *zap.Logger) usecase.ChainRepository {
 	return &chainlistRepo{
 		client: &fasthttp.Client{},
@@ -32,6 +34,7 @@ func NewChainlistRepo(cfg config.ChainlistConfig, logger *zap.Logger) usecase.Ch
 	}
 }
 
+// GetAllChains fetches the full list of chains from the configured Chainlist URL.
 func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error) {
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()

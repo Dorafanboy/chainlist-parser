@@ -26,11 +26,13 @@ type ChainApiResponse struct {
 	RPCEndpoints RPCResponse `json:"rpcEndpoints"`
 }
 
+// ChainHandler holds dependencies for HTTP handlers related to chains.
 type ChainHandler struct {
 	useCase usecase.ChainUseCase
 	logger  *zap.Logger
 }
 
+// NewChainHandler creates a new instance of ChainHandler.
 func NewChainHandler(uc usecase.ChainUseCase, logger *zap.Logger) *ChainHandler {
 	return &ChainHandler{
 		useCase: uc,
@@ -38,7 +40,7 @@ func NewChainHandler(uc usecase.ChainUseCase, logger *zap.Logger) *ChainHandler 
 	}
 }
 
-// GetAllChains handles requests for all chains.
+// GetAllChains handles requests for all chains, returning data possibly from cache or fresh.
 func (h *ChainHandler) GetAllChains(ctx *fasthttp.RequestCtx) {
 	chains, err := h.useCase.GetAllChainsChecked(ctx)
 	if err != nil {
