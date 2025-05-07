@@ -9,6 +9,7 @@ import (
 
 	"chainlist-parser/internal/config"
 	"chainlist-parser/internal/entity"
+	"chainlist-parser/internal/pkg/apperrors"
 	"chainlist-parser/internal/usecase"
 
 	"github.com/valyala/fasthttp"
@@ -46,7 +47,7 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 	req.Header.Set(fasthttp.HeaderAcceptEncoding, "gzip")
 
 	deadline, hasDeadline := ctx.Deadline()
-	timeout := 15 * time.Second // Default timeout
+	timeout := 15 * time.Second
 	if hasDeadline {
 		requestTimeout := time.Until(deadline)
 		if requestTimeout > 0 && requestTimeout < timeout {
@@ -63,14 +64,25 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 	err := r.client.DoTimeout(req, resp, timeout)
 	if err != nil {
 		r.logger.Error("Failed to execute request to Chainlist", zap.Error(err))
-		return nil, fmt.Errorf("failed to fetch from chainlist: %w", err)
+		return nil, fmt.Errorf("%w: failed to execute request to Chainlist: %v", apperrors.ErrExternalServiceFailure, err)
+	}
+
+	if resp.StatusCode() == fasthttp.StatusNotFound {
+		r.logger.Warn(
+			"Chainlist source reported not found",
+			zap.Int("statusCode", resp.StatusCode()),
+			zap.ByteString("body", resp.Body()),
+		)
+		return nil, fmt.Errorf("%w: chainlist source reported not found (%s)", apperrors.ErrNotFound, r.url)
 	}
 
 	if resp.StatusCode() != fasthttp.StatusOK {
-		r.logger.Error("Chainlist returned non-OK status",
+		r.logger.Error(
+			"Chainlist returned non-OK status",
 			zap.Int("statusCode", resp.StatusCode()),
-			zap.ByteString("body", resp.Body()))
-		return nil, fmt.Errorf("chainlist returned status %d", resp.StatusCode())
+			zap.ByteString("body", resp.Body()),
+		)
+		return nil, fmt.Errorf("%w: chainlist returned status %d", apperrors.ErrExternalServiceFailure, resp.StatusCode())
 	}
 
 	var body []byte
@@ -80,7 +92,7 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 		body, err = resp.BodyGunzip()
 		if err != nil {
 			r.logger.Error("Failed to gunzip Chainlist response body", zap.Error(err))
-			return nil, fmt.Errorf("failed to decompress chainlist response: %w", err)
+			return nil, fmt.Errorf("%w: failed to decompress chainlist response: %v", apperrors.ErrExternalServiceFailure, err)
 		}
 	} else {
 		body = resp.Body()
@@ -89,10 +101,17 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 	var chains []entity.Chain
 	err = json.Unmarshal(body, &chains)
 	if err != nil {
-		r.logger.Error("Failed to unmarshal Chainlist response", zap.Error(err))
-		return nil, fmt.Errorf("failed to parse chainlist response: %w", err)
+		r.logger.Error("Failed to unmarshal Chainlist response", zap.Error(err), zap.ByteString("bodySample", body[:min(1024, len(body))]))
+		return nil, fmt.Errorf("%w: failed to parse chainlist response: %v", apperrors.ErrExternalServiceFailure, err)
 	}
 
 	r.logger.Info("Successfully fetched chains from Chainlist", zap.Int("count", len(chains)))
 	return chains, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -1,101 +1,147 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"strings"
+	"os"
 	"time"
 
-	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds all configuration for the application.
 type Config struct {
-	App       AppConfig       `mapstructure:"app"`
-	Server    ServerConfig    `mapstructure:"server"`
-	Logger    LoggerConfig    `mapstructure:"logger"`
-	Checker   CheckerConfig   `mapstructure:"checker"`
-	Cache     CacheConfig     `mapstructure:"cache"`
-	Chainlist ChainlistConfig `mapstructure:"chainlist"`
+	App       AppConfig       `yaml:"app"`
+	Server    ServerConfig    `yaml:"server"`
+	Logger    LoggerConfig    `yaml:"logger"`
+	Checker   CheckerConfig   `yaml:"checker"`
+	Cache     CacheConfig     `yaml:"cache"`
+	Chainlist ChainlistConfig `yaml:"chainlist"`
 }
 
 // AppConfig holds application-level configuration.
 type AppConfig struct {
-	Name    string `mapstructure:"name"`
-	Version string `mapstructure:"version"`
+	Name    string `yaml:"name"`
+	Version string `yaml:"version"`
 }
 
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
-	Port string `mapstructure:"port"`
+	Port string `yaml:"port"`
 }
 
 // LoggerConfig holds logging configuration.
 type LoggerConfig struct {
-	Level    string `mapstructure:"level"`
-	Encoding string `mapstructure:"encoding"`
+	Level    string `yaml:"level"`
+	Encoding string `yaml:"encoding"`
 }
 
 // CheckerConfig holds settings related to the RPC checking process.
 type CheckerConfig struct {
-	CheckInterval time.Duration `mapstructure:"check_interval"`
-	CheckTimeout  time.Duration `mapstructure:"check_timeout"`
-	MaxWorkers    int           `mapstructure:"max_workers"`
-	CacheTTL      time.Duration `mapstructure:"cache_ttl"`
-	RunOnStartup  bool          `mapstructure:"run_on_startup"`
+	CheckInterval time.Duration `yaml:"check_interval"`
+	CheckTimeout  time.Duration `yaml:"check_timeout"`
+	MaxWorkers    int           `yaml:"max_workers"`
+	CacheTTL      time.Duration `yaml:"cache_ttl"`
+	RunOnStartup  bool          `yaml:"run_on_startup"`
 }
 
 // CacheConfig holds settings for the caching layer.
 type CacheConfig struct {
-	DefaultExpiration time.Duration `mapstructure:"default_expiration"`
-	CleanupInterval   time.Duration `mapstructure:"cleanup_interval"`
+	DefaultExpiration time.Duration `yaml:"default_expiration"`
+	CleanupInterval   time.Duration `yaml:"cleanup_interval"`
 }
 
 // ChainlistConfig holds configuration for the Chainlist data source.
 type ChainlistConfig struct {
-	URL string `mapstructure:"url"`
+	URL string `yaml:"url"`
 }
 
-// Load reads configuration from file and environment variables.
-func Load(configPath string) (*Config, error) {
-	v := viper.New()
+// rawCheckerConfig is used for unmarshalling YAML string durations for CheckerConfig.
+type rawCheckerConfig struct {
+	CheckInterval string `yaml:"check_interval"`
+	CheckTimeout  string `yaml:"check_timeout"`
+	MaxWorkers    int    `yaml:"max_workers"`
+	CacheTTL      string `yaml:"cache_ttl"`
+	RunOnStartup  bool   `yaml:"run_on_startup"`
+}
 
-	v.SetDefault("app.name", "chainlist-parser")
-	v.SetDefault("app.version", "1.0.0")
-	v.SetDefault("server.port", "8080")
-	v.SetDefault("logger.level", "info")
-	v.SetDefault("logger.encoding", "json")
-	v.SetDefault("checker.check_interval", "15m")
-	v.SetDefault("checker.check_timeout", "5s")
-	v.SetDefault("checker.max_workers", 20)
-	v.SetDefault("checker.cache_ttl", "30m")
-	v.SetDefault("checker.run_on_startup", true)
-	v.SetDefault("cache.default_expiration", "30m")
-	v.SetDefault("cache.cleanup_interval", "1h")
-	v.SetDefault("chainlist.url", "https://chainid.network/chains.json")
+// rawCacheConfig is used for unmarshalling YAML string durations for CacheConfig.
+type rawCacheConfig struct {
+	DefaultExpiration string `yaml:"default_expiration"`
+	CleanupInterval   string `yaml:"cleanup_interval"`
+}
 
-	v.SetConfigName("config")
-	v.SetConfigType("yaml")
-	v.AddConfigPath(configPath)
-	v.AddConfigPath(".")
+// rawConfig is the top-level struct for unmarshalling the raw YAML data.
+type rawConfig struct {
+	App       AppConfig        `yaml:"app"`
+	Server    ServerConfig     `yaml:"server"`
+	Logger    LoggerConfig     `yaml:"logger"`
+	Checker   rawCheckerConfig `yaml:"checker"`
+	Cache     rawCacheConfig   `yaml:"cache"`
+	Chainlist ChainlistConfig  `yaml:"chainlist"`
+}
 
-	if err := v.ReadInConfig(); err != nil {
-		var configFileNotFoundError viper.ConfigFileNotFoundError
-		if errors.As(err, &configFileNotFoundError) {
-			fmt.Printf("Warning: Config file not found in %s or '.', using defaults/env vars\n", configPath)
-		}
+// LoadFromYAML reads configuration from a YAML file.
+func LoadFromYAML(filePath string) (*Config, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file %s: %w", filePath, err)
 	}
 
-	v.SetEnvPrefix("CHAINLIST_PARSER")
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	v.AutomaticEnv()
-
-	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	var rawCfg rawConfig
+	err = yaml.Unmarshal(data, &rawCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal yaml data from %s: %w", filePath, err)
 	}
 
-	return &cfg, nil
+	cfg := &Config{
+		App:       rawCfg.App,
+		Server:    rawCfg.Server,
+		Logger:    rawCfg.Logger,
+		Chainlist: rawCfg.Chainlist,
+	}
+
+	checkerInterval, err := time.ParseDuration(rawCfg.Checker.CheckInterval)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to parse checker.check_interval '%s': %w", rawCfg.Checker.CheckInterval, err,
+		)
+	}
+	checkerTimeout, err := time.ParseDuration(rawCfg.Checker.CheckTimeout)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to parse checker.check_timeout '%s': %w", rawCfg.Checker.CheckTimeout, err,
+		)
+	}
+	checkerCacheTTL, err := time.ParseDuration(rawCfg.Checker.CacheTTL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse checker.cache_ttl '%s': %w", rawCfg.Checker.CacheTTL, err)
+	}
+	cfg.Checker = CheckerConfig{
+		CheckInterval: checkerInterval,
+		CheckTimeout:  checkerTimeout,
+		MaxWorkers:    rawCfg.Checker.MaxWorkers,
+		CacheTTL:      checkerCacheTTL,
+		RunOnStartup:  rawCfg.Checker.RunOnStartup,
+	}
+
+	cacheDefExp, err := time.ParseDuration(rawCfg.Cache.DefaultExpiration)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to parse cache.default_expiration '%s': %w", rawCfg.Cache.DefaultExpiration, err,
+		)
+	}
+	cacheCleanInt, err := time.ParseDuration(rawCfg.Cache.CleanupInterval)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to parse cache.cleanup_interval '%s': %w", rawCfg.Cache.CleanupInterval, err,
+		)
+	}
+	cfg.Cache = CacheConfig{
+		DefaultExpiration: cacheDefExp,
+		CleanupInterval:   cacheCleanInt,
+	}
+
+	return cfg, nil
 }
 
 // GetTimeout returns the configured check timeout duration.

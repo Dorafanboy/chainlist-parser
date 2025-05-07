@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"chainlist-parser/internal/pkg/apperrors"
 	"chainlist-parser/internal/usecase"
 
 	"github.com/gorilla/websocket"
@@ -68,7 +69,7 @@ func (c *rpcChecker) CheckRPC(ctx context.Context, rpcURL string) (isWorking boo
 	}
 
 	c.logger.Warn("Skipping check for unsupported protocol", zap.String("url", rpcURL))
-	return false, 0, fmt.Errorf("unsupported protocol in URL: %s", rpcURL)
+	return false, 0, fmt.Errorf("%w: unsupported protocol in URL %s", apperrors.ErrInvalidInput, rpcURL)
 }
 
 // checkHTTP performs the JSON-RPC check over HTTP/HTTPS.
@@ -110,20 +111,21 @@ func (c *rpcChecker) checkHTTP(ctx context.Context, rpcURL string, startTime tim
 				zap.Duration("timeout", timeout),
 				zap.Error(requestErr),
 			)
-			return false, latency, fmt.Errorf("http request timed out after %v: %w", timeout, requestErr)
+			return false, latency, fmt.Errorf("%w: http request to %s timed out after %v: %v", apperrors.ErrTimeout, rpcURL, timeout, requestErr)
 		}
 		c.logger.Debug("HTTP RPC check request failed", zap.String("url", rpcURL), zap.Error(requestErr))
-		return false, latency, fmt.Errorf("http request failed: %w", requestErr)
+		return false, latency, fmt.Errorf("%w: http request to %s failed: %v", apperrors.ErrExternalServiceFailure, rpcURL, requestErr)
 	}
 
 	if resp.StatusCode() != fasthttp.StatusOK {
-		c.logger.Debug("HTTP RPC check returned non-OK status",
+		c.logger.Debug(
+			"HTTP RPC check returned non-OK status",
 			zap.String("url", rpcURL),
-			zap.Int("statusCode", resp.StatusCode()))
-		return false, latency, fmt.Errorf("non-OK http status: %d", resp.StatusCode())
+			zap.Int("statusCode", resp.StatusCode()),
+		)
+		return false, latency, fmt.Errorf("%w: rpc %s returned non-OK http status: %d", apperrors.ErrExternalServiceFailure, rpcURL, resp.StatusCode())
 	}
 
-	// Reuse the validation logic for the response body
 	isValid, jsonErr := c.validateJSONRPCResponse(rpcURL, resp.Body())
 	return isValid, latency, jsonErr
 }
@@ -143,11 +145,16 @@ func (c *rpcChecker) checkWSS(ctx context.Context, rpcURL string, startTime time
 	if err != nil {
 		c.logger.Debug("WSS dial failed", zap.String("url", rpcURL), zap.Error(err))
 		if ctxErr := context.Cause(ctx); ctxErr != nil {
-			return false, latency, fmt.Errorf("wss dial context error: %w", ctxErr)
-		} else if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) {
-			return false, latency, fmt.Errorf("wss dial cancelled/timed out: %w", ctx.Err())
+			if errors.Is(ctxErr, context.DeadlineExceeded) {
+				return false, latency, fmt.Errorf("%w: wss dial to %s context timed out: %v", apperrors.ErrTimeout, rpcURL, ctxErr)
+			}
+			return false, latency, fmt.Errorf("%w: wss dial to %s context error: %v", apperrors.ErrExternalServiceFailure, rpcURL, ctxErr)
+		} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return false, latency, fmt.Errorf("%w: wss dial to %s timed out: %v", apperrors.ErrTimeout, rpcURL, ctx.Err())
+		} else if errors.Is(ctx.Err(), context.Canceled) {
+			return false, latency, fmt.Errorf("%w: wss dial to %s cancelled: %v", apperrors.ErrExternalServiceFailure, rpcURL, ctx.Err())
 		}
-		return false, latency, fmt.Errorf("wss dial failed: %w", err)
+		return false, latency, fmt.Errorf("%w: wss dial to %s failed: %v", apperrors.ErrExternalServiceFailure, rpcURL, err)
 	}
 	defer conn.Close()
 
@@ -164,18 +171,23 @@ func (c *rpcChecker) checkWSS(ctx context.Context, rpcURL string, startTime time
 
 	if wErr := conn.WriteMessage(websocket.TextMessage, checkPayload); wErr != nil {
 		c.logger.Debug("WSS write message failed", zap.String("url", rpcURL), zap.Error(wErr))
-		return false, latency, fmt.Errorf("wss write failed: %w", wErr)
+		return false, latency, fmt.Errorf("%w: wss write to %s failed: %v", apperrors.ErrExternalServiceFailure, rpcURL, wErr)
 	}
 
 	_, message, rErr := conn.ReadMessage()
 	if rErr != nil {
 		c.logger.Debug("WSS read message failed", zap.String("url", rpcURL), zap.Error(rErr))
 		if ctxErr := context.Cause(ctx); ctxErr != nil {
-			return false, latency, fmt.Errorf("wss read context error: %w", ctxErr)
-		} else if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) {
-			return false, latency, fmt.Errorf("wss read cancelled/timed out: %w", ctx.Err())
+			if errors.Is(ctxErr, context.DeadlineExceeded) {
+				return false, latency, fmt.Errorf("%w: wss read from %s context timed out: %v", apperrors.ErrTimeout, rpcURL, ctxErr)
+			}
+			return false, latency, fmt.Errorf("%w: wss read from %s context error: %v", apperrors.ErrExternalServiceFailure, rpcURL, ctxErr)
+		} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return false, latency, fmt.Errorf("%w: wss read from %s timed out: %v", apperrors.ErrTimeout, rpcURL, ctx.Err())
+		} else if errors.Is(ctx.Err(), context.Canceled) {
+			return false, latency, fmt.Errorf("%w: wss read from %s cancelled: %v", apperrors.ErrExternalServiceFailure, rpcURL, ctx.Err())
 		}
-		return false, latency, fmt.Errorf("wss read failed: %w", rErr)
+		return false, latency, fmt.Errorf("%w: wss read from %s failed: %v", apperrors.ErrExternalServiceFailure, rpcURL, rErr)
 	}
 
 	c.logger.Debug("WSS received response", zap.String("url", rpcURL), zap.ByteString("body", message))
@@ -192,28 +204,32 @@ func (c *rpcChecker) validateJSONRPCResponse(rpcURL string, body []byte) (bool, 
 	var rpcResp JSONRPCResponse
 	err := json.Unmarshal(body, &rpcResp)
 	if err != nil {
-		c.logger.Debug("RPC check failed to unmarshal JSON response",
+		c.logger.Debug(
+			"RPC check failed to unmarshal JSON response",
 			zap.String("url", rpcURL),
 			zap.ByteString("body", body),
-			zap.Error(err))
-		return false, fmt.Errorf("invalid JSON response: %w", err)
+			zap.Error(err),
+		)
+		return false, fmt.Errorf("%w: rpc %s returned invalid JSON response: %v", apperrors.ErrExternalServiceFailure, rpcURL, err)
 	}
 
 	if rpcResp.Error != nil {
-		c.logger.Debug("RPC check returned JSON-RPC error",
+		c.logger.Debug(
+			"RPC check returned JSON-RPC error",
 			zap.String("url", rpcURL),
 			zap.Int("errorCode", rpcResp.Error.Code),
 			zap.String("errorMessage", rpcResp.Error.Message),
 		)
-		return false, fmt.Errorf("json-rpc error: %d %s", rpcResp.Error.Code, rpcResp.Error.Message)
+		return false, fmt.Errorf("%w: rpc %s returned json-rpc error: %d %s", apperrors.ErrExternalServiceFailure, rpcURL, rpcResp.Error.Code, rpcResp.Error.Message)
 	}
 
 	if rpcResp.Jsonrpc != "2.0" || rpcResp.Result == nil {
-		c.logger.Debug("RPC check returned invalid JSON-RPC structure",
+		c.logger.Debug(
+			"RPC check returned invalid JSON-RPC structure",
 			zap.String("url", rpcURL),
 			zap.ByteString("body", body),
 		)
-		return false, fmt.Errorf("invalid JSON-RPC structure")
+		return false, fmt.Errorf("%w: rpc %s returned invalid JSON-RPC structure", apperrors.ErrExternalServiceFailure, rpcURL)
 	}
 
 	return true, nil

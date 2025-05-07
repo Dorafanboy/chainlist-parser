@@ -1,17 +1,5 @@
 package entity
 
-// Protocol defines the type for RPC protocols.
-type Protocol string
-
-// Constants for known protocols.
-const (
-	ProtocolHTTP    Protocol = "http"
-	ProtocolHTTPS   Protocol = "https"
-	ProtocolWS      Protocol = "ws"
-	ProtocolWSS     Protocol = "wss"
-	ProtocolUnknown Protocol = "unknown"
-)
-
 // NetworkType defines the type for network classifications (e.g., mainnet, testnet).
 type NetworkType string
 
@@ -20,14 +8,6 @@ const (
 	NetworkMainnet NetworkType = "mainnet"
 	NetworkTestnet NetworkType = "testnet"
 )
-
-// RPCDetail holds information about a specific RPC endpoint after checking.
-type RPCDetail struct {
-	URL       string   `json:"url"`
-	Protocol  Protocol `json:"protocol"`
-	IsWorking *bool    `json:"isWorking"`
-	LatencyMs *int64   `json:"latencyMs,omitempty"`
-}
 
 // Chain represents the data structure for a blockchain network from Chainlist.
 type Chain struct {
@@ -49,7 +29,7 @@ type Chain struct {
 	Parent      *Parent     `json:"parent,omitempty"`
 	Network     NetworkType `json:"network,omitempty"`
 	RedFlags    []string    `json:"redFlags,omitempty"`
-	CheckedRPCs []RPCDetail `json:"checkedRPCs,omitempty"`
+	CheckedRPCs []RPCDetail `json:"checkedRPCs,omitempty"` // This field will be populated by our service
 }
 
 // Currency defines the native currency details of a chain.

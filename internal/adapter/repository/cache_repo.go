@@ -36,9 +36,11 @@ func NewGoCacheRepo(cfg config.Config, logger *zap.Logger) usecase.CacheReposito
 	cleanupInterval := cfg.Cache.GetCleanupInterval()
 
 	c := cache.New(defaultExpiration, cleanupInterval)
-	logger.Info("Initialized go-cache",
+	logger.Info(
+		"Initialized go-cache",
 		zap.Duration("defaultExpiration", defaultExpiration),
-		zap.Duration("cleanupInterval", cleanupInterval))
+		zap.Duration("cleanupInterval", cleanupInterval),
+	)
 
 	return &goCacheRepo{
 		cache:   c,

@@ -20,12 +20,15 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	configFilePath = "config/config.yaml"
+)
+
 // main is the entry point of the application.
 func main() {
-	cfgPath := "config"
-	cfg, err := config.Load(cfgPath)
+	cfg, err := config.LoadFromYAML(configFilePath)
 	if err != nil {
-		log.Fatalf("Failed to load configuration from %s: %v", cfgPath, err)
+		log.Fatalf("Failed to load configuration from %s: %v", configFilePath, err)
 	}
 
 	logger, err := parserLogger.NewLogger(cfg.Logger)
@@ -65,7 +68,8 @@ func main() {
 
 	loggingMiddleware := func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
-			logger.Info("Request received",
+			logger.Info(
+				"Request received",
 				zap.ByteString("method", ctx.Method()),
 				zap.ByteString("uri", ctx.RequestURI()))
 			next(ctx)
