@@ -14,7 +14,7 @@ const (
 
 // RPCDetail holds information about a specific RPC endpoint after checking.
 type RPCDetail struct {
-	URL       string   `json:"url"`
+	URL       RPCURL   `json:"url"`
 	Protocol  Protocol `json:"protocol"`
 	IsWorking *bool    `json:"isWorking"`
 	LatencyMs *int64   `json:"latencyMs,omitempty"`

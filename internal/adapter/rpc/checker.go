@@ -1,4 +1,4 @@
-package repository
+package rpc
 
 import (
 	"context"
@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"chainlist-parser/internal/domain/entity"
+	domainService "chainlist-parser/internal/domain/service"
 	"chainlist-parser/internal/pkg/apperrors"
-	"chainlist-parser/internal/usecase"
 
 	"github.com/gorilla/websocket"
 	"github.com/valyala/fasthttp"
@@ -18,21 +19,21 @@ import (
 )
 
 // Compile-time check
-var _ usecase.RPCChecker = (*rpcChecker)(nil)
+var _ domainService.RPCChecker = (*Checker)(nil)
 
-// rpcChecker implements the RPCChecker interface.
-type rpcChecker struct {
+// Checker implements the domainService.RPCChecker interface.
+type Checker struct {
 	client *fasthttp.Client
 	logger *zap.Logger
 }
 
-// NewRPCChecker creates a new RPC checker instance.
-func NewRPCChecker(logger *zap.Logger) usecase.RPCChecker {
-	return &rpcChecker{
+// NewChecker creates a new RPC checker instance.
+func NewChecker(logger *zap.Logger) domainService.RPCChecker {
+	return &Checker{
 		client: &fasthttp.Client{
 			ReadTimeout: 10 * time.Second,
 		},
-		logger: logger.Named("RPCChecker"),
+		logger: logger.Named("RPCCheckerAdapter"),
 	}
 }
 
@@ -55,25 +56,29 @@ type JSONRPCError struct {
 }
 
 // CheckRPC determines the protocol and calls the appropriate check function.
-func (c *rpcChecker) CheckRPC(ctx context.Context, rpcURL string) (isWorking bool, latency time.Duration, err error) {
+func (c *Checker) CheckRPC(
+	ctx context.Context,
+	rpcURL entity.RPCURL,
+) (isWorking bool, latency time.Duration, err error) {
 	startTime := time.Now()
+	rawURL := rpcURL.String()
 
-	if strings.HasPrefix(rpcURL, "wss://") || strings.HasPrefix(rpcURL, "ws://") {
-		isWorking, latency, err = c.checkWSS(ctx, rpcURL, startTime)
+	if strings.HasPrefix(rawURL, "wss://") || strings.HasPrefix(rawURL, "ws://") {
+		isWorking, latency, err = c.checkWSS(ctx, rawURL, startTime)
 		return
 	}
 
-	if strings.HasPrefix(rpcURL, "http://") || strings.HasPrefix(rpcURL, "https://") {
-		isWorking, latency, err = c.checkHTTP(ctx, rpcURL, startTime)
+	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
+		isWorking, latency, err = c.checkHTTP(ctx, rawURL, startTime)
 		return
 	}
 
-	c.logger.Warn("Skipping check for unsupported protocol", zap.String("url", rpcURL))
-	return false, 0, fmt.Errorf("%w: unsupported protocol in URL %s", apperrors.ErrInvalidInput, rpcURL)
+	c.logger.Warn("Skipping check for unsupported protocol in validated RPCURL", zap.String("url", rawURL))
+	return false, 0, fmt.Errorf("%w: unsupported protocol in URL %s", apperrors.ErrInvalidInput, rawURL)
 }
 
 // checkHTTP performs the JSON-RPC check over HTTP/HTTPS.
-func (c *rpcChecker) checkHTTP(ctx context.Context, rpcURL string, startTime time.Time) (bool, time.Duration, error) {
+func (c *Checker) checkHTTP(ctx context.Context, rpcURL string, startTime time.Time) (bool, time.Duration, error) {
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)
@@ -95,7 +100,9 @@ func (c *rpcChecker) checkHTTP(ctx context.Context, rpcURL string, startTime tim
 
 	var requestErr error
 	if timeout <= 0 {
-		c.logger.Warn("No timeout specified for fasthttp request, using default Do", zap.String("url", rpcURL))
+		c.logger.Warn("No effective timeout specified for fasthttp request, using default Do",
+			zap.String("url", rpcURL),
+		)
 		requestErr = c.client.Do(req, resp)
 	} else {
 		requestErr = c.client.DoTimeout(req, resp, timeout)
@@ -111,10 +118,14 @@ func (c *rpcChecker) checkHTTP(ctx context.Context, rpcURL string, startTime tim
 				zap.Duration("timeout", timeout),
 				zap.Error(requestErr),
 			)
-			return false, latency, fmt.Errorf("%w: http request to %s timed out after %v: %v", apperrors.ErrTimeout, rpcURL, timeout, requestErr)
+			return false, latency, fmt.Errorf("%w: http request to %s timed out after %v: %v",
+				apperrors.ErrTimeout, rpcURL, timeout, requestErr,
+			)
 		}
 		c.logger.Debug("HTTP RPC check request failed", zap.String("url", rpcURL), zap.Error(requestErr))
-		return false, latency, fmt.Errorf("%w: http request to %s failed: %v", apperrors.ErrExternalServiceFailure, rpcURL, requestErr)
+		return false, latency, fmt.Errorf("%w: http request to %s failed: %v",
+			apperrors.ErrExternalServiceFailure, rpcURL, requestErr,
+		)
 	}
 
 	if resp.StatusCode() != fasthttp.StatusOK {
@@ -123,7 +134,9 @@ func (c *rpcChecker) checkHTTP(ctx context.Context, rpcURL string, startTime tim
 			zap.String("url", rpcURL),
 			zap.Int("statusCode", resp.StatusCode()),
 		)
-		return false, latency, fmt.Errorf("%w: rpc %s returned non-OK http status: %d", apperrors.ErrExternalServiceFailure, rpcURL, resp.StatusCode())
+		return false, latency, fmt.Errorf("%w: rpc %s returned non-OK http status: %d",
+			apperrors.ErrExternalServiceFailure, rpcURL, resp.StatusCode(),
+		)
 	}
 
 	isValid, jsonErr := c.validateJSONRPCResponse(rpcURL, resp.Body())
@@ -131,76 +144,108 @@ func (c *rpcChecker) checkHTTP(ctx context.Context, rpcURL string, startTime tim
 }
 
 // checkWSS performs the JSON-RPC check over WSS/WS.
-func (c *rpcChecker) checkWSS(ctx context.Context, rpcURL string, startTime time.Time) (bool, time.Duration, error) {
-	dialer := websocket.Dialer{
-		Proxy:            http.ProxyFromEnvironment,
-		HandshakeTimeout: 10 * time.Second,
+func (c *Checker) checkWSS(ctx context.Context, rpcURL string, startTime time.Time) (bool, time.Duration, error) {
+	handshakeTimeout := c.client.ReadTimeout
+	if handshakeTimeout <= 0 {
+		handshakeTimeout = 10 * time.Second
 	}
 
-	c.logger.Debug("Attempting WSS connection", zap.String("url", rpcURL))
+	dialer := websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: handshakeTimeout,
+	}
+
+	c.logger.Debug("Attempting WSS connection",
+		zap.String("url", rpcURL), zap.Duration("handshakeTimeout", handshakeTimeout),
+	)
 
 	conn, _, err := dialer.DialContext(ctx, rpcURL, nil)
-	latency := time.Since(startTime)
+	latencyAfterDial := time.Since(startTime)
 
 	if err != nil {
 		c.logger.Debug("WSS dial failed", zap.String("url", rpcURL), zap.Error(err))
 		if ctxErr := context.Cause(ctx); ctxErr != nil {
 			if errors.Is(ctxErr, context.DeadlineExceeded) {
-				return false, latency, fmt.Errorf("%w: wss dial to %s context timed out: %v", apperrors.ErrTimeout, rpcURL, ctxErr)
+				return false, latencyAfterDial, fmt.Errorf("%w: wss dial to %s context timed out: %v",
+					apperrors.ErrTimeout, rpcURL, ctxErr,
+				)
 			}
-			return false, latency, fmt.Errorf("%w: wss dial to %s context error: %v", apperrors.ErrExternalServiceFailure, rpcURL, ctxErr)
+			return false, latencyAfterDial, fmt.Errorf("%w: wss dial to %s context error: %v",
+				apperrors.ErrExternalServiceFailure, rpcURL, ctxErr,
+			)
 		} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return false, latency, fmt.Errorf("%w: wss dial to %s timed out: %v", apperrors.ErrTimeout, rpcURL, ctx.Err())
-		} else if errors.Is(ctx.Err(), context.Canceled) {
-			return false, latency, fmt.Errorf("%w: wss dial to %s cancelled: %v", apperrors.ErrExternalServiceFailure, rpcURL, ctx.Err())
+			return false, latencyAfterDial, fmt.Errorf("%w: wss dial to %s timed out (ctx.Err): %v",
+				apperrors.ErrTimeout, rpcURL, ctx.Err(),
+			)
 		}
-		return false, latency, fmt.Errorf("%w: wss dial to %s failed: %v", apperrors.ErrExternalServiceFailure, rpcURL, err)
+
+		return false, latencyAfterDial, fmt.Errorf("%w: wss dial to %s failed: %v",
+			apperrors.ErrExternalServiceFailure, rpcURL, err,
+		)
 	}
 	defer conn.Close()
 
 	c.logger.Debug("WSS connection successful, sending check payload", zap.String("url", rpcURL))
 
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetWriteDeadline(deadline)
-		_ = conn.SetReadDeadline(deadline)
-	} else {
-		defaultOpTimeout := 15 * time.Second
-		_ = conn.SetWriteDeadline(time.Now().Add(defaultOpTimeout))
-		_ = conn.SetReadDeadline(time.Now().Add(defaultOpTimeout))
+	operationTimeout := c.client.ReadTimeout
+	if operationTimeout <= 0 {
+		operationTimeout = 15 * time.Second
 	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) < operationTimeout {
+			operationTimeout = time.Until(deadline)
+		}
+	}
+
+	if operationTimeout <= 0 {
+		operationTimeout = 2 * time.Second
+	}
+
+	_ = conn.SetWriteDeadline(time.Now().Add(operationTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(operationTimeout))
 
 	if wErr := conn.WriteMessage(websocket.TextMessage, checkPayload); wErr != nil {
 		c.logger.Debug("WSS write message failed", zap.String("url", rpcURL), zap.Error(wErr))
-		return false, latency, fmt.Errorf("%w: wss write to %s failed: %v", apperrors.ErrExternalServiceFailure, rpcURL, wErr)
+		return false, time.Since(startTime), fmt.Errorf("%w: wss write to %s failed: %v",
+			apperrors.ErrExternalServiceFailure, rpcURL, wErr,
+		)
 	}
 
 	_, message, rErr := conn.ReadMessage()
+	finalLatency := time.Since(startTime)
 	if rErr != nil {
 		c.logger.Debug("WSS read message failed", zap.String("url", rpcURL), zap.Error(rErr))
 		if ctxErr := context.Cause(ctx); ctxErr != nil {
 			if errors.Is(ctxErr, context.DeadlineExceeded) {
-				return false, latency, fmt.Errorf("%w: wss read from %s context timed out: %v", apperrors.ErrTimeout, rpcURL, ctxErr)
+				return false, finalLatency, fmt.Errorf("%w: wss read from %s context timed out: %v",
+					apperrors.ErrTimeout, rpcURL, ctxErr,
+				)
 			}
-			return false, latency, fmt.Errorf("%w: wss read from %s context error: %v", apperrors.ErrExternalServiceFailure, rpcURL, ctxErr)
+			return false, finalLatency, fmt.Errorf("%w: wss read from %s context error: %v",
+				apperrors.ErrExternalServiceFailure, rpcURL, ctxErr,
+			)
 		} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return false, latency, fmt.Errorf("%w: wss read from %s timed out: %v", apperrors.ErrTimeout, rpcURL, ctx.Err())
-		} else if errors.Is(ctx.Err(), context.Canceled) {
-			return false, latency, fmt.Errorf("%w: wss read from %s cancelled: %v", apperrors.ErrExternalServiceFailure, rpcURL, ctx.Err())
+			return false, finalLatency, fmt.Errorf("%w: wss read from %s timed out (ctx.Err): %v",
+				apperrors.ErrTimeout, rpcURL, ctx.Err(),
+			)
 		}
-		return false, latency, fmt.Errorf("%w: wss read from %s failed: %v", apperrors.ErrExternalServiceFailure, rpcURL, rErr)
+		return false, finalLatency, fmt.Errorf("%w: wss read from %s failed: %v",
+			apperrors.ErrExternalServiceFailure, rpcURL, rErr,
+		)
 	}
 
 	c.logger.Debug("WSS received response", zap.String("url", rpcURL), zap.ByteString("body", message))
 
 	isValid, jsonErr := c.validateJSONRPCResponse(rpcURL, message)
 	if isValid {
-		latency = time.Since(startTime)
+		return isValid, finalLatency, jsonErr
 	}
-	return isValid, latency, jsonErr
+	return isValid, time.Since(startTime), jsonErr
 }
 
 // validateJSONRPCResponse checks if the response body is a valid, successful JSON-RPC response.
-func (c *rpcChecker) validateJSONRPCResponse(rpcURL string, body []byte) (bool, error) {
+func (c *Checker) validateJSONRPCResponse(rpcURL string, body []byte) (bool, error) {
 	var rpcResp JSONRPCResponse
 	err := json.Unmarshal(body, &rpcResp)
 	if err != nil {
@@ -210,7 +255,9 @@ func (c *rpcChecker) validateJSONRPCResponse(rpcURL string, body []byte) (bool, 
 			zap.ByteString("body", body),
 			zap.Error(err),
 		)
-		return false, fmt.Errorf("%w: rpc %s returned invalid JSON response: %v", apperrors.ErrExternalServiceFailure, rpcURL, err)
+		return false, fmt.Errorf("%w: rpc %s returned invalid JSON response: %v",
+			apperrors.ErrExternalServiceFailure, rpcURL, err,
+		)
 	}
 
 	if rpcResp.Error != nil {
@@ -220,7 +267,9 @@ func (c *rpcChecker) validateJSONRPCResponse(rpcURL string, body []byte) (bool, 
 			zap.Int("errorCode", rpcResp.Error.Code),
 			zap.String("errorMessage", rpcResp.Error.Message),
 		)
-		return false, fmt.Errorf("%w: rpc %s returned json-rpc error: %d %s", apperrors.ErrExternalServiceFailure, rpcURL, rpcResp.Error.Code, rpcResp.Error.Message)
+		return false, fmt.Errorf("%w: rpc %s returned json-rpc error: %d %s",
+			apperrors.ErrExternalServiceFailure, rpcURL, rpcResp.Error.Code, rpcResp.Error.Message,
+		)
 	}
 
 	if rpcResp.Jsonrpc != "2.0" || rpcResp.Result == nil {
@@ -229,7 +278,9 @@ func (c *rpcChecker) validateJSONRPCResponse(rpcURL string, body []byte) (bool, 
 			zap.String("url", rpcURL),
 			zap.ByteString("body", body),
 		)
-		return false, fmt.Errorf("%w: rpc %s returned invalid JSON-RPC structure", apperrors.ErrExternalServiceFailure, rpcURL)
+		return false, fmt.Errorf("%w: rpc %s returned invalid JSON-RPC structure",
+			apperrors.ErrExternalServiceFailure, rpcURL,
+		)
 	}
 
 	return true, nil

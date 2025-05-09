@@ -1,4 +1,4 @@
-package repository
+package chainlist
 
 import (
 	"bytes"
@@ -7,36 +7,37 @@ import (
 	"fmt"
 	"time"
 
+	dto "chainlist-parser/internal/adapter/storage/chainlist/dto"
 	"chainlist-parser/internal/config"
-	"chainlist-parser/internal/entity"
+	"chainlist-parser/internal/domain/entity"
+	domainRepo "chainlist-parser/internal/domain/repository"
 	"chainlist-parser/internal/pkg/apperrors"
-	"chainlist-parser/internal/usecase"
 
 	"github.com/valyala/fasthttp"
 	"go.uber.org/zap"
 )
 
 // Compile-time check
-var _ usecase.ChainRepository = (*chainlistRepo)(nil)
+var _ domainRepo.ChainRepository = (*Repository)(nil)
 
-// chainlistRepo implements ChainRepository for fetching data from the Chainlist source.
-type chainlistRepo struct {
+// Repository implements ChainRepository for fetching data from the Chainlist source.
+type Repository struct {
 	client *fasthttp.Client
 	url    string
 	logger *zap.Logger
 }
 
-// NewChainlistRepo creates a new Chainlist repository instance.
-func NewChainlistRepo(cfg config.ChainlistConfig, logger *zap.Logger) usecase.ChainRepository {
-	return &chainlistRepo{
+// NewRepository creates a new Chainlist repository instance. It configures the HTTP client and stores the Chainlist URL.
+func NewRepository(cfg config.ChainlistConfig, logger *zap.Logger) domainRepo.ChainRepository {
+	return &Repository{
 		client: &fasthttp.Client{},
 		url:    cfg.URL,
-		logger: logger.Named("ChainlistRepo"),
+		logger: logger.Named("ChainlistStorage"),
 	}
 }
 
 // GetAllChains fetches the full list of chains from the configured Chainlist URL.
-func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error) {
+func (r *Repository) GetAllChains(ctx context.Context) ([]entity.Chain, error) {
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)
@@ -64,7 +65,9 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 	err := r.client.DoTimeout(req, resp, timeout)
 	if err != nil {
 		r.logger.Error("Failed to execute request to Chainlist", zap.Error(err))
-		return nil, fmt.Errorf("%w: failed to execute request to Chainlist: %v", apperrors.ErrExternalServiceFailure, err)
+		return nil, fmt.Errorf("%w: failed to execute request to Chainlist: %v",
+			apperrors.ErrExternalServiceFailure, err,
+		)
 	}
 
 	if resp.StatusCode() == fasthttp.StatusNotFound {
@@ -82,7 +85,9 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 			zap.Int("statusCode", resp.StatusCode()),
 			zap.ByteString("body", resp.Body()),
 		)
-		return nil, fmt.Errorf("%w: chainlist returned status %d", apperrors.ErrExternalServiceFailure, resp.StatusCode())
+		return nil, fmt.Errorf("%w: chainlist returned status %d",
+			apperrors.ErrExternalServiceFailure, resp.StatusCode(),
+		)
 	}
 
 	var body []byte
@@ -92,23 +97,36 @@ func (r *chainlistRepo) GetAllChains(ctx context.Context) ([]entity.Chain, error
 		body, err = resp.BodyGunzip()
 		if err != nil {
 			r.logger.Error("Failed to gunzip Chainlist response body", zap.Error(err))
-			return nil, fmt.Errorf("%w: failed to decompress chainlist response: %v", apperrors.ErrExternalServiceFailure, err)
+			return nil, fmt.Errorf("%w: failed to decompress chainlist response: %v",
+				apperrors.ErrExternalServiceFailure, err,
+			)
 		}
 	} else {
 		body = resp.Body()
 	}
 
-	var chains []entity.Chain
-	err = json.Unmarshal(body, &chains)
+	var rawChains []dto.ChainRaw
+	err = json.Unmarshal(body, &rawChains)
 	if err != nil {
-		r.logger.Error("Failed to unmarshal Chainlist response", zap.Error(err), zap.ByteString("bodySample", body[:min(1024, len(body))]))
-		return nil, fmt.Errorf("%w: failed to parse chainlist response: %v", apperrors.ErrExternalServiceFailure, err)
+		r.logger.Error("Failed to unmarshal Chainlist response into raw DTOs",
+			zap.Error(err), zap.ByteString("bodySample", body[:min(1024, len(body))]),
+		)
+		return nil, fmt.Errorf("%w: failed to parse chainlist response into raw DTOs: %v",
+			apperrors.ErrExternalServiceFailure, err,
+		)
 	}
 
-	r.logger.Info("Successfully fetched chains from Chainlist", zap.Int("count", len(chains)))
-	return chains, nil
+	r.logger.Info("Successfully fetched and unmarshaled raw chains from Chainlist",
+		zap.Int("count", len(rawChains)),
+	)
+
+	domainChains := toDomainChains(rawChains, r.logger)
+	r.logger.Info("Successfully mapped raw DTOs to domain entities", zap.Int("count", len(domainChains)))
+
+	return domainChains, nil
 }
 
+// min returns the smaller of two integers.
 func min(a, b int) int {
 	if a < b {
 		return a

@@ -1,12 +1,13 @@
 package http
 
 import (
-	"chainlist-parser/internal/entity"
 	"encoding/json"
 	"errors"
 	"strconv"
 
-	"chainlist-parser/internal/usecase"
+	"chainlist-parser/internal/application/port"
+	"chainlist-parser/internal/domain"
+	"chainlist-parser/internal/domain/entity"
 
 	"github.com/valyala/fasthttp"
 	"go.uber.org/zap"
@@ -16,7 +17,7 @@ import (
 type APIError struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message"`
-	Details string `json:"details,omitempty"` // Optional details for the error
+	Details string `json:"details,omitempty"`
 }
 
 // RPCResponse defines the structure for returning filtered RPC endpoints.
@@ -51,12 +52,12 @@ func newAPIErrorResponse(code, message, details string) APIErrorResponse {
 
 // ChainHandler holds dependencies for HTTP handlers related to chains.
 type ChainHandler struct {
-	chainService usecase.ChainService
+	chainService port.ChainService
 	logger       *zap.Logger
 }
 
 // NewChainHandler creates a new instance of ChainHandler.
-func NewChainHandler(cs usecase.ChainService, logger *zap.Logger) *ChainHandler {
+func NewChainHandler(cs port.ChainService, logger *zap.Logger) *ChainHandler {
 	return &ChainHandler{
 		chainService: cs,
 		logger:       logger.Named("ChainHandler"),
@@ -71,17 +72,20 @@ func (h *ChainHandler) GetAllChains(ctx *fasthttp.RequestCtx) {
 		var httpStatus int
 
 		switch {
-		case errors.Is(err, usecase.ErrUpstreamSourceFailure):
+		case errors.Is(err, domain.ErrUpstreamSourceFailure):
 			httpStatus = fasthttp.StatusServiceUnavailable
-			apiErrResp = newAPIErrorResponse("upstream_failure", "Failed to fetch data from the upstream source.", err.Error())
-		case errors.Is(err, usecase.ErrCacheFailure):
+			apiErrResp = newAPIErrorResponse("UPSTREAM_SOURCE_FAILURE",
+				"Failed to fetch data from the upstream source.", err.Error())
+		case errors.Is(err, domain.ErrCacheFailure):
 			h.logger.Error("Internal cache failure detected in handler", zap.Error(err))
 			httpStatus = fasthttp.StatusInternalServerError
-			apiErrResp = newAPIErrorResponse("cache_error", "An internal error occurred with the caching system.", "")
+			apiErrResp = newAPIErrorResponse("CACHE_FAILURE",
+				"An internal error occurred with the caching system.", "")
 		default:
 			h.logger.Error("Unhandled internal error in GetAllChains", zap.Error(err))
 			httpStatus = fasthttp.StatusInternalServerError
-			apiErrResp = newAPIErrorResponse("internal_error", "An unexpected internal server error occurred.", "")
+			apiErrResp = newAPIErrorResponse("INTERNAL_SERVER_ERROR",
+				"An unexpected internal server error occurred.", "")
 		}
 		h.respondWithError(ctx, httpStatus, apiErrResp)
 		return
@@ -118,7 +122,7 @@ func (h *ChainHandler) GetChainRPCs(ctx *fasthttp.RequestCtx) {
 			ctx,
 			fasthttp.StatusBadRequest,
 			newAPIErrorResponse(
-				"bad_request",
+				"BAD_REQUEST",
 				"Invalid chainId format in path.",
 				"chainId must be a string representing a number."),
 		)
@@ -127,8 +131,10 @@ func (h *ChainHandler) GetChainRPCs(ctx *fasthttp.RequestCtx) {
 
 	chainID, err := strconv.ParseInt(chainIDStr, 10, 64)
 	if err != nil {
-		h.logger.Error("Failed to parse chainId from string", zap.String("chainIdStr", chainIDStr), zap.Error(err))
-		h.respondWithError(ctx, fasthttp.StatusBadRequest, newAPIErrorResponse("bad_request", "Invalid chainId in path.", "chainId must be a valid integer."))
+		h.logger.Error("Failed to parse chainId from string",
+			zap.String("chainIdStr", chainIDStr), zap.Error(err))
+		h.respondWithError(ctx, fasthttp.StatusBadRequest, newAPIErrorResponse("BAD_REQUEST",
+			"Invalid chainId in path.", "chainId must be a valid integer."))
 		return
 	}
 
@@ -138,23 +144,30 @@ func (h *ChainHandler) GetChainRPCs(ctx *fasthttp.RequestCtx) {
 		var httpStatus int
 
 		switch {
-		case errors.Is(err, usecase.ErrChainNotFound):
+		case errors.Is(err, domain.ErrChainNotFound):
 			httpStatus = fasthttp.StatusNotFound
-			apiErrResp = newAPIErrorResponse("chain_not_found", "The requested chain ID was not found.", "")
-		case errors.Is(err, usecase.ErrNoRPCsAvailable):
+			apiErrResp = newAPIErrorResponse("CHAIN_NOT_FOUND",
+				"The requested chain ID was not found.", "")
+		case errors.Is(err, domain.ErrNoRPCsAvailable):
 			httpStatus = fasthttp.StatusNotFound
-			apiErrResp = newAPIErrorResponse("no_rpcs_available", "No working RPCs found for the specified chain.", "")
-		case errors.Is(err, usecase.ErrUpstreamSourceFailure):
+			apiErrResp = newAPIErrorResponse("NO_RPCS_AVAILABLE",
+				"No working RPCs found for the specified chain.", "")
+		case errors.Is(err, domain.ErrUpstreamSourceFailure):
 			httpStatus = fasthttp.StatusServiceUnavailable
-			apiErrResp = newAPIErrorResponse("upstream_failure", "Failed to fetch data from the upstream source to find the chain.", err.Error())
-		case errors.Is(err, usecase.ErrCacheFailure):
-			h.logger.Error("Internal cache failure detected in handler for GetChainRPCs", zap.Int64("chainId", chainID), zap.Error(err))
+			apiErrResp = newAPIErrorResponse("UPSTREAM_SOURCE_FAILURE",
+				"Failed to fetch data from the upstream source to find the chain.", err.Error())
+		case errors.Is(err, domain.ErrCacheFailure):
+			h.logger.Error("Internal cache failure detected in handler for GetChainRPCs",
+				zap.Int64("chainId", chainID), zap.Error(err))
 			httpStatus = fasthttp.StatusInternalServerError
-			apiErrResp = newAPIErrorResponse("cache_error", "An internal error occurred with the caching system.", "")
+			apiErrResp = newAPIErrorResponse("CACHE_FAILURE",
+				"An internal error occurred with the caching system.", "")
 		default:
-			h.logger.Error("Unhandled internal error in GetChainRPCs", zap.Int64("chainId", chainID), zap.Error(err))
+			h.logger.Error("Unhandled internal error in GetChainRPCs",
+				zap.Int64("chainId", chainID), zap.Error(err))
 			httpStatus = fasthttp.StatusInternalServerError
-			apiErrResp = newAPIErrorResponse("internal_error", "An unexpected internal server error occurred.", "")
+			apiErrResp = newAPIErrorResponse("INTERNAL_SERVER_ERROR",
+				"An unexpected internal server error occurred.", "")
 		}
 		h.respondWithError(ctx, httpStatus, apiErrResp)
 		return
@@ -163,15 +176,13 @@ func (h *ChainHandler) GetChainRPCs(ctx *fasthttp.RequestCtx) {
 	httpEndpoints, wssEndpoints := filterAndCategorizeRPCs(h.logger, chainID, checkedRPCs)
 
 	if len(httpEndpoints) == 0 && len(wssEndpoints) == 0 {
-		h.logger.Info(
-			"No displayable HTTP/S or WSS endpoints found for chain after local filtering in handler",
+		h.logger.Info("No displayable HTTP/S or WSS endpoints found for chain after local filtering in handler",
 			zap.Int64("chainId", chainID),
 		)
 		h.respondWithError(
 			ctx,
 			fasthttp.StatusNotFound,
-			newAPIErrorResponse(
-				"no_rpcs_displayable",
+			newAPIErrorResponse("NO_RPCS_DISPLAYABLE",
 				"No displayable RPCs found for the specified chain after filtering.",
 				""),
 		)
@@ -190,7 +201,7 @@ func (h *ChainHandler) GetChainRPCs(ctx *fasthttp.RequestCtx) {
 	}
 }
 
-// Вспомогательная функция для отправки JSON-ошибки
+// respondWithError is a helper function to send a JSON error response with a given HTTP status code.
 func (h *ChainHandler) respondWithError(ctx *fasthttp.RequestCtx, httpStatus int, apiErrResp APIErrorResponse) {
 	ctx.SetStatusCode(httpStatus)
 	ctx.SetContentType("application/json")
@@ -199,7 +210,7 @@ func (h *ChainHandler) respondWithError(ctx *fasthttp.RequestCtx, httpStatus int
 	}
 }
 
-// filterAndCategorizeRPCs разделяет RPC на HTTP и WSS, логируя процесс.
+// filterAndCategorizeRPCs filters and categorizes RPC details into HTTP/HTTPS and WS/WSS endpoint lists.
 func filterAndCategorizeRPCs(
 	logger *zap.Logger,
 	chainID int64,
@@ -208,9 +219,8 @@ func filterAndCategorizeRPCs(
 	httpEps = make([]string, 0)
 	wssEps = make([]string, 0)
 	if len(rpcs) == 0 {
-		logger.Debug(
-			"filterAndCategorizeRPCs received empty rpcs slice, "+
-				"implies no working RPCs from usecase or initial list was empty",
+		logger.Debug("filterAndCategorizeRPCs received empty rpcs slice, "+
+			"implies no working RPCs from usecase or initial list was empty",
 			zap.Int64("chainId", chainID),
 		)
 		return
@@ -219,24 +229,22 @@ func filterAndCategorizeRPCs(
 	for _, rpc := range rpcs {
 		switch rpc.Protocol {
 		case entity.ProtocolWSS, entity.ProtocolWS:
-			wssEps = append(wssEps, rpc.URL)
+			wssEps = append(wssEps, rpc.URL.String())
 		case entity.ProtocolHTTPS, entity.ProtocolHTTP:
 			if rpc.IsWorking != nil && *rpc.IsWorking {
-				httpEps = append(httpEps, rpc.URL)
+				httpEps = append(httpEps, rpc.URL.String())
 			} else {
-				logger.Debug(
-					"Skipping non-working or non-HTTP/S RPC in filter",
+				logger.Debug("Skipping non-working or non-HTTP/S RPC in filter",
 					zap.Int64("chainId", chainID),
-					zap.String("url", rpc.URL),
+					zap.String("url", rpc.URL.String()),
 					zap.Any("protocol", rpc.Protocol),
 					zap.Boolp("is_working", rpc.IsWorking),
 				)
 			}
 		default:
-			logger.Debug(
-				"Skipping RPC with unknown/unhandled protocol in filter",
+			logger.Debug("Skipping RPC with unknown/unhandled protocol in filter",
 				zap.Int64("chainId", chainID),
-				zap.String("url", rpc.URL),
+				zap.String("url", rpc.URL.String()),
 				zap.Any("protocol", rpc.Protocol),
 			)
 		}

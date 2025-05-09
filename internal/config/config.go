@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -141,6 +142,10 @@ func LoadFromYAML(filePath string) (*Config, error) {
 		CleanupInterval:   cacheCleanInt,
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
 	return cfg, nil
 }
 
@@ -167,4 +172,44 @@ func (c CacheConfig) GetDefaultExpiration() time.Duration {
 // GetCleanupInterval returns the configured cache cleanup interval.
 func (c CacheConfig) GetCleanupInterval() time.Duration {
 	return c.CleanupInterval
+}
+
+// Validate checks the configuration values for basic correctness.
+func (c *Config) Validate() error {
+	if c.Server.Port == "" {
+		return fmt.Errorf("server.port must be set")
+	}
+	if _, err := strconv.Atoi(c.Server.Port); err != nil {
+		return fmt.Errorf("server.port must be a valid number: %w", err)
+	}
+
+	if c.Logger.Level == "" {
+		return fmt.Errorf("logger.level must be set")
+	}
+
+	if c.Chainlist.URL == "" {
+		return fmt.Errorf("chainlist.url must be set")
+	}
+
+	if c.Checker.CheckInterval <= 0 {
+		return fmt.Errorf("checker.check_interval must be positive")
+	}
+	if c.Checker.CheckTimeout <= 0 {
+		return fmt.Errorf("checker.check_timeout must be positive")
+	}
+	if c.Checker.MaxWorkers <= 0 {
+		return fmt.Errorf("checker.max_workers must be positive")
+	}
+	if c.Checker.CacheTTL <= 0 {
+		return fmt.Errorf("checker.cache_ttl must be positive")
+	}
+
+	if c.Cache.DefaultExpiration <= 0 {
+		return fmt.Errorf("cache.default_expiration must be positive")
+	}
+	if c.Cache.CleanupInterval <= 0 {
+		return fmt.Errorf("cache.cleanup_interval must be positive")
+	}
+
+	return nil
 }
