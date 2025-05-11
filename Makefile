@@ -1,72 +1,61 @@
-# Makefile for chainlist-parser
+# Go parameters
+GOBASE := $(shell pwd)
+GOBUILD := go build
+GOTEST := go test
+GOCLEAN := go clean
+GOMOD := go mod
+LINT := golangci-lint run
 
-# Variables
-BINARY_NAME=chainlist-parser
-BUILD_DIR=build
-CMD_PATH=./cmd/api/main.go
-PKG_LIST=$(shell go list ./... | grep -v /vendor/)
+# Binary name
+BINARY_NAME := api
+CMD_PATH := ./cmd/api
+
+.PHONY: all build clean test lint run docker-build infra-run infra-down help
+
+all: build
+
+build: ## Build the application binary
+	@echo "Building $(BINARY_NAME)..."
+	$(GOBUILD) -o $(BINARY_NAME) $(CMD_PATH)/main.go
+
+clean: ## Remove previous build
+	@echo "Cleaning..."
+	$(GOCLEAN)
+	rm -f $(BINARY_NAME)
+
+test: ## Run tests
+	@echo "Running tests..."
+	$(GOTEST) ./...
+
+lint: ## Run linters
+	@echo "Running linters..."
+	$(LINT) ./...
+
+run: build ## Build and run the application (foreground)
+	@echo "Running $(BINARY_NAME)..."
+	./$(BINARY_NAME)
+
+# Docker commands
+docker-build: ## Build the Docker image
+	@echo "Building Docker image..."
+	docker build -t $(BINARY_NAME):latest .
+
+docker-run: ## Run the application in a Docker container
+	@echo "Running Docker container..."
+	docker run --rm -p 8080:8080 --name $(BINARY_NAME)-instance $(BINARY_NAME):latest
+
+infra-up: ## Start the application using docker-compose
+	@echo "Starting docker-compose service..."
+	docker-compose up -d --build
+
+infra-down: ## Stop the application using docker-compose
+	@echo "Stopping docker-compose service..."
+	docker-compose down
+
+help: ## Display this help screen
+	@echo 'Usage: make <TARGETS>'
+	@echo '\nAvailable targets:'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # Default target
-.PHONY: help
-help:
-	@echo "Usage: make <target>"
-	@echo ""
-	@echo "Targets:"
-	@echo "  help          Show this help message"
-	@echo "  lint          Run golangci-lint"
-	@echo "  test          Run tests"
-	@echo "  build         Build the binary into $(BUILD_DIR)/"
-	@echo "  run           Run the service locally using go run"
-	@echo "  clean         Clean the build directory"
-	@echo "  docker-build  Build the docker image"
-	@echo "  docker-up     Start the service using docker-compose"
-	@echo "  docker-down   Stop the service using docker-compose"
-
-# Linting
-.PHONY: lint
-lint:
-	@echo "Running linter..."
-	@golangci-lint run ./...
-
-# Testing
-.PHONY: test
-test:
-	@echo "Running tests..."
-	@go test -v -race -coverprofile=coverage.out $(PKG_LIST)
-	@echo "Test coverage report generated: coverage.out"
-
-# Build
-.PHONY: build
-build: clean
-	@echo "Building binary..."
-	@mkdir -p $(BUILD_DIR)
-	@go build -ldflags="-s -w" -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_PATH)
-	@echo "Binary built at $(BUILD_DIR)/$(BINARY_NAME)"
-
-# Run locally
-.PHONY: run
-run:
-	@echo "Running service locally (go run)..."
-	@go run $(CMD_PATH)
-
-# Clean build directory
-.PHONY: clean
-clean:
-	@echo "Cleaning build directory..."
-	@rm -rf $(BUILD_DIR)
-
-# Docker operations
-.PHONY: docker-build
-docker-build:
-	@echo "Building docker image..."
-	@docker-compose build
-
-.PHONY: docker-up
-docker-up: docker-build
-	@echo "Starting service with docker-compose..."
-	@docker-compose up -d # Run in detached mode
-
-.PHONY: docker-down
-docker-down:
-	@echo "Stopping service with docker-compose..."
-	@docker-compose down 
+.DEFAULT_GOAL := help 
